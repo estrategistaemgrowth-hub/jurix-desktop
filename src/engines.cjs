@@ -69,10 +69,31 @@ function whichFromShell(name) {
   }
 }
 
+/**
+ * Codex do npm: o codex.js inicia o codex.exe sem esconder o console, e num app sem
+ * terminal (o Jurix) o Windows abre uma janela preta a cada pergunta. Chamando o
+ * codex.exe direto, a janela fica escondida (windowsHide).
+ */
+function nativeCodex(jsPath) {
+  if (!win || !jsPath.endsWith(".js")) return jsPath;
+  const pkg = join(jsPath, "..", "..");
+  const [arch, triple] =
+    process.arch === "arm64"
+      ? ["arm64", "aarch64-pc-windows-msvc"]
+      : ["x64", "x86_64-pc-windows-msvc"];
+  const exe = [
+    join(pkg, "node_modules", "@openai", `codex-win32-${arch}`, "vendor", triple, "bin", "codex.exe"),
+    join(pkg, "..", `codex-win32-${arch}`, "vendor", triple, "bin", "codex.exe"),
+    join(pkg, "vendor", triple, "bin", "codex.exe"),
+  ].find((p) => existsSync(p));
+  return exe || jsPath;
+}
+
 /** Caminho do executável do motor, ou null se não estiver instalado. */
 function findEngine(name) {
   const found = CANDIDATES[name].filter(Boolean).find((p) => existsSync(p));
-  return found || whichFromShell(name);
+  const path = found || whichFromShell(name);
+  return path && name === "codex" ? nativeCodex(path) : path;
 }
 
 // .js (Codex via npm) roda com o próprio Node embutido no Electron.
