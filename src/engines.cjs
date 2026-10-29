@@ -253,7 +253,7 @@ function codexQuota(sessionsDir = join(home, ".codex", "sessions")) {
 // Conversa curta responde mais rápido com raciocínio leve (Claude: ~2 s a menos);
 // peça, minuta e análise longa seguem no esforço padrão.
 const DRAFTING_RE =
-  /minuta|peti[cç][aã]o|contrato|parecer|recurso|contesta|redij|elabor|escrev|redac|analis|notifica/i;
+  /minuta|peti[cç][aã]o|contrato|parecer|recurso|contesta|redij|elabor|escrev|redac|analis|notifica|relat[oó]rio|document|pdf|word|export|pesquis/i;
 function isQuick(request) {
   const last = [...(request.messages || [])].reverse().find((m) => m.role === "user");
   const text = String(last?.content || "");
