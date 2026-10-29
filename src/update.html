@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self' 'unsafe-inline'">
+<title>Atualização do Jurix</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+  /* Mesmo sistema visual do login e do onboarding (.ax-*). */
+  :root {
+    --ax-primary: #7232f1; --ax-deep: #3d1a9e; --ax-ink: #061b31; --ax-muted: #55657d;
+    --ax-line: #e2e8f2; --ax-soft: #f4f6fb; --ax-ok: #0f7a4d;
+    --font: 'Inter', 'SF Pro Display', 'Helvetica Neue', Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font); color: var(--ax-ink); -webkit-font-smoothing: antialiased;
+    background: #fff; display: flex; flex-direction: column; overflow: hidden;
+    -webkit-user-select: none; user-select: none;
+  }
+  .hero {
+    position: relative; padding: 28px 28px 22px; color: #fff; -webkit-app-region: drag;
+    background: radial-gradient(360px 220px at 85% 0%, rgba(255,255,255,.16), transparent 60%),
+      linear-gradient(160deg, var(--ax-primary) 0%, var(--ax-deep) 100%);
+  }
+  .mark {
+    width: 52px; height: 52px; border-radius: 16px; background: #fff; display: grid; place-items: center;
+    box-shadow: 0 10px 24px -10px rgba(0,0,0,.45); animation: float 3s ease-in-out infinite;
+  }
+  .mark img { width: 30px; }
+  .hero h1 { margin: 16px 0 4px; font-size: 21px; font-weight: 600; letter-spacing: -0.02em; }
+  .versions { display: flex; align-items: center; gap: 8px; font-size: 13px; color: rgba(255,255,255,.85); }
+  .pill { padding: 3px 9px; border-radius: 999px; background: rgba(255,255,255,.16); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .pill.new { background: #fff; color: var(--ax-primary); }
+
+  .body { flex: 1; min-height: 0; padding: 18px 28px 0; display: flex; flex-direction: column; }
+  .body h2 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--ax-muted); }
+  .notes { flex: 1; min-height: 0; overflow-y: auto; margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; align-content: start; }
+  .notes li { display: flex; gap: 10px; font-size: 13.5px; line-height: 1.45; animation: rise .4s cubic-bezier(.22,1,.36,1) both; }
+  .notes li::before { content: ""; flex: none; width: 6px; height: 6px; margin-top: 7px; border-radius: 50%; background: var(--ax-primary); }
+
+  .progress { margin-top: 14px; display: none; }
+  .progress.on { display: block; animation: rise .3s both; }
+  .bar { height: 8px; border-radius: 8px; background: var(--ax-soft); overflow: hidden; }
+  .bar span {
+    display: block; height: 100%; border-radius: 8px; transform: scaleX(0); transform-origin: left;
+    transition: transform .3s ease;
+    background: linear-gradient(90deg, var(--ax-primary), #9b6bff, var(--ax-primary)) 0 0 / 200% 100%;
+    animation: flow 1.4s linear infinite;
+  }
+  .meta { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--ax-muted); font-variant-numeric: tabular-nums; }
+
+  .actions { display: flex; gap: 10px; padding: 18px 28px 24px; }
+  button {
+    height: 44px; border-radius: 12px; font: 600 14px var(--font); cursor: pointer;
+    transition: transform .15s, box-shadow .2s, background .2s;
+  }
+  button:focus-visible { outline: 3px solid rgba(114,50,241,.35); outline-offset: 2px; }
+  .primary {
+    flex: 1; border: 0; background: var(--ax-primary); color: #fff;
+    box-shadow: 0 8px 20px -8px rgba(114,50,241,.55);
+  }
+  .primary:hover:not(:disabled) { transform: translateY(-1px); }
+  .primary:disabled { opacity: .7; cursor: default; }
+  .ghost { padding: 0 18px; border: 1.5px solid var(--ax-line); background: #fff; color: var(--ax-ink); }
+  .ghost:hover { border-color: var(--ax-primary); color: var(--ax-primary); }
+  .done .primary { background: var(--ax-ok); box-shadow: 0 8px 20px -8px rgba(15,122,77,.5); }
+
+  @keyframes float { 50% { transform: translateY(-4px) rotate(-4deg); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  @keyframes flow { to { background-position: -200% 0; } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <header class="hero">
+    <div class="mark"><img src="../build/jurix-x.svg" alt=""></div>
+    <h1 id="title">Nova versão do Jurix</h1>
+    <div class="versions">
+      <span>Você usa</span><span class="pill" id="current">—</span>
+      <span aria-hidden="true">→</span><span class="pill new" id="next">—</span>
+    </div>
+  </header>
+
+  <section class="body" aria-labelledby="notes-title">
+    <h2 id="notes-title">O que mudou</h2>
+    <ul class="notes" id="notes"></ul>
+    <div class="progress" id="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+      <div class="bar"><span id="bar"></span></div>
+      <div class="meta"><span id="status">Baixando…</span><span id="amount"></span></div>
+    </div>
+  </section>
+
+  <footer class="actions">
+    <button class="ghost" id="later" type="button">Depois</button>
+    <button class="primary" id="go" type="button">Atualizar agora</button>
+  </footer>
+
+<script>
+  const api = window.jurixDesktop;
+  const $ = (id) => document.getElementById(id);
+  const mb = (n) => (n / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+  let phase = "available";
+
+  api.onUpdate((s) => {
+    if (s.current) $("current").textContent = "v" + s.current;
+    if (s.version) $("next").textContent = "v" + s.version;
+    if (s.notes) {
+      $("notes").replaceChildren(
+        ...s.notes.map((text, i) => {
+          const li = document.createElement("li");
+          li.textContent = text;
+          li.style.animationDelay = i * 0.05 + "s";
+          return li;
+        }),
+      );
+    }
+    phase = s.phase;
+    const go = $("go");
+    if (s.phase === "available") {
+      go.textContent = s.manual ? "Baixar nova versão" : "Atualizar agora";
+      go.disabled = false;
+    }
+    if (s.phase === "downloading") {
+      $("progress").classList.add("on");
+      const pct = Math.round(s.percent || 0);
+      $("bar").style.transform = "scaleX(" + pct / 100 + ")";
+      $("progress").setAttribute("aria-valuenow", String(pct));
+      $("status").textContent = "Baixando… " + pct + "%";
+      $("amount").textContent = s.total ? mb(s.transferred || 0) + " de " + mb(s.total) : "";
+      go.textContent = "Baixando…";
+      go.disabled = true;
+      $("later").textContent = "Continuar usando";
+    }
+    if (s.phase === "ready") {
+      document.body.classList.add("done");
+      $("progress").classList.add("on");
+      $("bar").style.transform = "scaleX(1)";
+      $("status").textContent = "Pronto para instalar";
+      $("amount").textContent = "";
+      $("title").textContent = "Atualização baixada";
+      go.textContent = "Reiniciar e instalar";
+      go.disabled = false;
+      $("later").textContent = "Ao fechar o app";
+    }
+    if (s.phase === "error") {
+      $("status").textContent = "Não deu para baixar agora. Tente de novo mais tarde.";
+      go.textContent = "Tentar de novo";
+      go.disabled = false;
+    }
+  });
+
+  $("go").addEventListener("click", () => {
+    if (phase === "ready") api.installUpdate();
+    else api.startUpdate();
+  });
+  $("later").addEventListener("click", () => api.dismissUpdate());
+</script>
+</body>
+</html>

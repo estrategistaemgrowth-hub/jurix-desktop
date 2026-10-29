@@ -16,17 +16,17 @@ const tools = [
 
 async function smoke(engine, path) {
   const t0 = Date.now();
-  const text = await runJob(engine, path, {
+  const { reply: text, quota } = await runJob(engine, path, {
     messages: [system, { role: "user", content: "Em uma frase: o que é contestação?" }],
   });
   const t1 = Date.now();
 
   const ask = { role: "user", content: "Quais são os prazos deste processo?" };
-  const first = await runJob(engine, path, { messages: [system, ask], tools });
+  const { reply: first } = await runJob(engine, path, { messages: [system, ask], tools });
   const call = first.toolCalls?.[0];
   let final = null;
   if (call) {
-    final = await runJob(engine, path, {
+    ({ reply: final } = await runJob(engine, path, {
       messages: [
         system,
         ask,
@@ -38,10 +38,11 @@ async function smoke(engine, path) {
         },
       ],
       tools,
-    });
+    }));
   }
   const t2 = Date.now();
   console.log(`\n=== ${engine} ===`);
+  console.log(`cota: ${quota ? JSON.stringify(quota.windows) : "não informada"}`);
   console.log(`texto (${((t1 - t0) / 1000).toFixed(1)}s): ${text.content.slice(0, 160)}`);
   console.log(`pediu ferramenta: ${call ? call.function.name : "NÃO"}`);
   console.log(`resposta final (${((t2 - t1) / 1000).toFixed(1)}s): ${(final?.content ?? first.content).slice(0, 220)}`);

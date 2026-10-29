@@ -1,6 +1,16 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { buildPrompt, parseToolReply } = require("../src/engines.cjs");
+const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
+const { join } = require("node:path");
+const {
+  buildPrompt,
+  parseToolReply,
+  isQuick,
+  claudeQuota,
+  codexQuota,
+  LIMIT_RE,
+} = require("../src/engines.cjs");
 
 const tools = [
   {
@@ -56,4 +66,61 @@ test("lê pedido de ferramenta e converte para o formato OpenAI", () => {
 test("resposta final em JSON ou em texto solto", () => {
   assert.deepEqual(parseToolReply('{"content":"Prazo em 18/11."}'), { content: "Prazo em 18/11." });
   assert.deepEqual(parseToolReply("  Prazo em 18/11.  "), { content: "Prazo em 18/11." });
+});
+
+test("cota do Claude: janelas de 5 horas e semanal do rate_limit_event", () => {
+  const quota = claudeQuota({
+    type: "rate_limit_event",
+    rate_limit_info: {
+      unifiedWindows: {
+        five_hour: { utilization: 0.41, resetsAt: 1793295600 },
+        seven_day: { utilization: 0.586, resetsAt: 1793365200 },
+      },
+    },
+  });
+  assert.deepEqual(quota.windows, [
+    { label: "5 horas", usedPercent: 41, resetsAt: 1793295600 },
+    { label: "semana", usedPercent: 59, resetsAt: 1793365200 },
+  ]);
+  assert.equal(claudeQuota(undefined), null);
+});
+
+test("cota do Codex: rate_limits mais recente da pasta de sessões mais nova", () => {
+  const root = mkdtempSync(join(tmpdir(), "codex-sessions-"));
+  const write = (day, name, lines) => {
+    const dir = join(root, "2026", "10", day);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, name), lines.map((l) => JSON.stringify(l)).join("\n"));
+  };
+  const limits = (used) => ({
+    payload: {
+      type: "token_count",
+      rate_limits: { primary: { used_percent: used, window_minutes: 10080, resets_at: 1793800408 } },
+    },
+  });
+  write("27", "rollout-a.jsonl", [limits(90)]);
+  write("28", "rollout-b.jsonl", [limits(5), limits(11), { payload: { type: "agent_message" } }]);
+  try {
+    assert.deepEqual(codexQuota(root).windows, [
+      { label: "semana", usedPercent: 11, resetsAt: 1793800408 },
+    ]);
+    assert.equal(codexQuota(join(root, "nao-existe")), null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("modo rápido só em conversa curta, nunca em peça ou minuta", () => {
+  const ask = (content) => ({ messages: [{ role: "system", content: "x" }, { role: "user", content }] });
+  assert.equal(isQuick(ask("Olá, tudo bem?")), true);
+  assert.equal(isQuick(ask("Quais prazos vencem hoje?")), true);
+  assert.equal(isQuick(ask("Redija uma contestação para o processo 123")), false);
+  assert.equal(isQuick(ask("a".repeat(401))), false);
+  assert.equal(isQuick({ messages: [] }), false);
+});
+
+test("reconhece erro de limite da assinatura", () => {
+  assert.match("Claude AI usage limit reached|1793295600", LIMIT_RE);
+  assert.match("stream error: 429 Too Many Requests", LIMIT_RE);
+  assert.doesNotMatch("spawn ENOENT", LIMIT_RE);
 });

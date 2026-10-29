@@ -39,6 +39,27 @@ test("heartbeat na primeira volta e depois só a cada intervalo", async () => {
   assert.deepEqual(beats[0][1], { p_engine: "claude", p_available: ["claude", "codex"] });
 });
 
+test("manda a cota no heartbeat e, se o banco ainda não aceita p_status, bate sem ela", async () => {
+  const bodies = [];
+  const rpc = async (fn, body) => {
+    if (fn !== "local_ai_heartbeat") return [];
+    bodies.push(body);
+    if ("p_status" in body) throw new Error('local_ai_heartbeat falhou (404): {"code":"PGRST202"}');
+    return null;
+  };
+  const status = { claude: { windows: [{ label: "5 horas", usedPercent: 41 }] } };
+  const worker = createWorker({
+    rpc,
+    heartbeat: () => ({ engine: "claude", available: ["claude"], status }),
+    execute: async () => ({}),
+  });
+  await worker.tick();
+  assert.deepEqual(bodies, [
+    { p_engine: "claude", p_available: ["claude"], p_status: status },
+    { p_engine: "claude", p_available: ["claude"] },
+  ]);
+});
+
 test("repassa a IA escolhida pelo usuário que o servidor devolve no heartbeat", async () => {
   const rpc = async (fn) => (fn === "local_ai_heartbeat" ? "codex" : []);
   const chosen = [];

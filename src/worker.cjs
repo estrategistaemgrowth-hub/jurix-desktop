@@ -29,7 +29,8 @@ function createRpc({ getApiKey, getAuth, fetchImpl = fetch }) {
 }
 
 /**
- * heartbeat(): { engine, available } — IA em uso (ou null) e as encontradas no PC.
+ * heartbeat(): { engine, available, status? } — IA em uso (ou null), as encontradas no PC
+ * e a cota de cada uma.
  * onPreferred(engine): o servidor devolve a IA escolhida pelo usuário em Configurações.
  */
 function createWorker({ rpc, heartbeat, onPreferred = () => {}, execute, now = Date.now, log = console }) {
@@ -55,8 +56,11 @@ function createWorker({ rpc, heartbeat, onPreferred = () => {}, execute, now = D
   /** Uma volta do laço. Retorna o estado para a interface. */
   async function tick() {
     if (now() - lastHeartbeat >= HEARTBEAT_EVERY_MS) {
-      const { engine, available } = heartbeat();
-      const preferred = await rpc("local_ai_heartbeat", { p_engine: engine, p_available: available });
+      const { engine, available, status } = heartbeat();
+      const base = { p_engine: engine, p_available: available };
+      // Banco ainda sem a migration da cota (sem p_status): bate do jeito antigo.
+      const preferred = await rpc("local_ai_heartbeat", status ? { ...base, p_status: status } : base)
+        .catch((e) => (status && /p_status|PGRST202/.test(e.message) ? rpc("local_ai_heartbeat", base) : Promise.reject(e)));
       lastHeartbeat = now();
       if (preferred) onPreferred(preferred);
     }

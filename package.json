@@ -1,7 +1,7 @@
 {
   "name": "jurix-desktop",
   "productName": "Jurix",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Jurix com a IA da assinatura do próprio usuário (Claude, ChatGPT ou Gemini).",
   "author": "Jurix",
@@ -27,7 +27,7 @@
     "productName": "Jurix",
     "copyright": "Jurix",
     "directories": { "buildResources": "build", "output": "dist" },
-    "files": ["src/**/*", "build/icon.png", "package.json"],
+    "files": ["src/**/*", "build/icon.png", "build/*.svg", "package.json"],
     "publish": [
       {
         "provider": "github",

@@ -2,7 +2,7 @@
 // (Claude Code, Codex ou Antigravity) e devolve no formato que o servidor espera:
 // { content, toolCalls?, usage? }.
 const { spawn, execFileSync } = require("node:child_process");
-const { existsSync, readFileSync, rmSync } = require("node:fs");
+const { existsSync, readFileSync, readdirSync, rmSync, statSync } = require("node:fs");
 const { homedir, tmpdir } = require("node:os");
 const { join } = require("node:path");
 
@@ -170,15 +170,86 @@ function parseToolReply(text) {
   return { content: trimmed };
 }
 
-async function runClaude(path, { system, prompt }) {
+const WINDOW_LABEL = { 300: "5 horas", 10080: "semana" };
+const windowLabel = (minutes) =>
+  WINDOW_LABEL[minutes] ||
+  (minutes >= 1440 ? `${Math.round(minutes / 1440)} dias` : `${Math.round(minutes / 60)} horas`);
+const pct = (n) => Math.max(0, Math.min(100, Math.round(n)));
+
+/** Cota do Claude: evento rate_limit_event do stream-json (utilização 0-1 por janela). */
+function claudeQuota(event) {
+  const windows = event?.rate_limit_info?.unifiedWindows;
+  if (!windows) return null;
+  const list = [
+    ["five_hour", "5 horas"],
+    ["seven_day", "semana"],
+  ]
+    .filter(([key]) => windows[key])
+    .map(([key, label]) => ({
+      label,
+      usedPercent: pct((windows[key].utilization || 0) * 100),
+      resetsAt: windows[key].resetsAt,
+    }));
+  return list.length > 0 ? { windows: list, updatedAt: Date.now() } : null;
+}
+
+/** Cota do Codex: o rate_limits mais recente que o próprio Codex grava nas sessões. */
+function codexQuota(sessionsDir = join(home, ".codex", "sessions")) {
+  try {
+    // sessions/AAAA/MM/DD/rollout-*.jsonl: a pasta mais nova tem a leitura mais recente.
+    let dir = sessionsDir;
+    for (let i = 0; i < 3; i++) {
+      const sub = readdirSync(dir)
+        .filter((n) => /^\d+$/.test(n))
+        .sort();
+      if (sub.length === 0) return null;
+      dir = join(dir, sub[sub.length - 1]);
+    }
+    const files = readdirSync(dir)
+      .filter((n) => n.endsWith(".jsonl"))
+      .map((n) => join(dir, n))
+      .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
+    for (const file of files) {
+      for (const line of readFileSync(file, "utf8").split("\n").reverse()) {
+        if (!line.includes('"rate_limits"')) continue;
+        const limits = JSON.parse(line)?.payload?.rate_limits;
+        const list = [limits?.primary, limits?.secondary]
+          .filter((w) => w && typeof w.used_percent === "number")
+          .map((w) => ({
+            label: windowLabel(w.window_minutes),
+            usedPercent: pct(w.used_percent),
+            resetsAt: w.resets_at,
+          }));
+        if (list.length > 0) return { windows: list, updatedAt: statSync(file).mtimeMs };
+      }
+    }
+  } catch {
+    // sem sessões ou formato diferente: fica sem cota
+  }
+  return null;
+}
+
+// Conversa curta responde mais rápido com raciocínio leve (Claude: ~2 s a menos);
+// peça, minuta e análise longa seguem no esforço padrão.
+const DRAFTING_RE =
+  /minuta|peti[cç][aã]o|contrato|parecer|recurso|contesta|redij|elabor|escrev|redac|analis|notifica/i;
+function isQuick(request) {
+  const last = [...(request.messages || [])].reverse().find((m) => m.role === "user");
+  const text = String(last?.content || "");
+  return text.length > 0 && text.length <= 400 && !DRAFTING_RE.test(text);
+}
+
+async function runClaude(path, { system, prompt, quick }) {
   const out = await run(
     command(path, [
       "-p",
       "--output-format",
-      "json",
+      "stream-json", // traz o evento de cota (rate_limit_event) junto com o resultado
+      "--verbose",
       "--no-session-persistence",
       "--model",
       "sonnet",
+      ...(quick ? ["--effort", "low"] : []),
       "--safe-mode", // ignora hooks, MCPs, plugins e CLAUDE.md do usuário
       "--tools",
       "", // só gera texto: não mexe em arquivos nem roda comandos
@@ -187,7 +258,13 @@ async function runClaude(path, { system, prompt }) {
     ]),
     prompt,
   );
-  const j = JSON.parse(out);
+  const events = out
+    .split("\n")
+    .filter((l) => l.trim().startsWith("{"))
+    .map((l) => JSON.parse(l));
+  const quota = claudeQuota(events.find((e) => e.type === "rate_limit_event"));
+  const j = events.find((e) => e.type === "result");
+  if (!j) throw new Error("Claude não devolveu resposta.");
   if (j.is_error) throw new Error(j.result || "Claude retornou erro.");
   const usage = j.usage
     ? {
@@ -198,10 +275,10 @@ async function runClaude(path, { system, prompt }) {
         completion_tokens: j.usage.output_tokens,
       }
     : undefined;
-  return { text: j.result, usage };
+  return { text: j.result, usage, quota };
 }
 
-async function runCodex(path, { system, prompt }) {
+async function runCodex(path, { system, prompt, quick }) {
   const file = join(tmpdir(), `jurix-codex-${process.pid}-${Date.now()}-${callSeq++}.txt`);
   try {
     await run(
@@ -212,13 +289,14 @@ async function runCodex(path, { system, prompt }) {
         "--sandbox",
         "read-only",
         ...CODEX_LOCKDOWN_ARGS,
+        ...(quick ? ["-c", 'model_reasoning_effort="low"'] : []),
         "-o",
         file,
         "-",
       ]),
       `${system}\n\n${prompt}`,
     );
-    return { text: readFileSync(file, "utf8") };
+    return { text: readFileSync(file, "utf8"), quota: codexQuota() };
   } finally {
     rmSync(file, { force: true });
   }
@@ -306,19 +384,33 @@ function startLogin(engine, path, onUrl) {
   });
 }
 
-/** Executa uma tarefa do Jurix (request da fila) no motor escolhido. */
+// Mensagens de limite da assinatura (Claude: "usage limit reached"; Codex: "rate limit"/"usage limit").
+const LIMIT_RE =
+  /usage limit|rate.?limit|limit reached|quota|resource.?exhausted|too many requests|\b429\b/i;
+
+/**
+ * Executa uma tarefa do Jurix (request da fila) no motor escolhido.
+ * { reply, quota }: quota (ou null) é a leitura mais recente da cota desse motor.
+ */
 async function runJob(engine, path, request) {
   const built = buildPrompt(request);
-  const { text, usage } = await RUNNERS[engine](path, built);
+  const { text, usage, quota = null } = await RUNNERS[engine](path, {
+    ...built,
+    quick: isQuick(request),
+  });
   const reply = built.hasTools ? parseToolReply(text) : { content: text.trim() };
-  return usage ? { ...reply, usage } : reply;
+  return { reply: usage ? { ...reply, usage } : reply, quota };
 }
 
 module.exports = {
   ENGINES,
+  LIMIT_RE,
   findEngine,
   buildPrompt,
   parseToolReply,
+  isQuick,
+  claudeQuota,
+  codexQuota,
   runJob,
   loginStatus,
   startLogin,

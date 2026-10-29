@@ -1,15 +1,24 @@
 // Jurix Desktop: o mesmo Jurix web numa janela, mais o motor de IA local.
 // Login, telas e regras são os da nuvem; o app só executa as tarefas de IA do
 // usuário logado na assinatura dele (Claude Code, Codex ou Antigravity).
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
 const { readFileSync, writeFileSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
-const { ENGINES, findEngine, runJob, loginStatus, startLogin } = require("./engines.cjs");
+const {
+  ENGINES,
+  LIMIT_RE,
+  findEngine,
+  codexQuota,
+  runJob,
+  loginStatus,
+  startLogin,
+} = require("./engines.cjs");
 const { createRpc, createWorker } = require("./worker.cjs");
 
-const TICK_MS = 2_000;
+const TICK_MS = 1_000; // tempo máximo até o desktop pegar uma pergunta nova
 const RESCAN_EVERY_MS = 15_000; // mesmo ritmo do heartbeat: "Localizar IAs" na web espera isso
-const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
+const UPDATE_EVERY_MS = 2 * 60 * 60 * 1000;
+const UPDATE_PAGE = join(__dirname, "update.html");
 const ICON = join(__dirname, "..", "build", "icon.png");
 const ONBOARDING = join(__dirname, "onboarding", "index.html");
 const SPLASH = join(__dirname, "splash.html");
@@ -69,8 +78,26 @@ function chooseEngine(installed, ...wishes) {
   return wishes.find((name) => name && installed[name]) || Object.keys(installed)[0] || null;
 }
 
-// Atualização do app: no Windows baixa e instala ao reiniciar; no Mac (sem assinatura
-// da Apple não há instalação automática) só avisa e abre o download.
+/** Notas do release (HTML ou lista do GitHub) em itens de texto para a janela. */
+function releaseNotes(info) {
+  const raw = Array.isArray(info.releaseNotes)
+    ? info.releaseNotes.map((n) => n.note || "").join("\n")
+    : String(info.releaseNotes || "");
+  const items = raw
+    .replace(/<\/(li|p|h\d)>|<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .split("\n")
+    .map((l) => l.replace(/^\s*[-*•#]+\s*/, "").trim())
+    .filter((l) => l.length > 2)
+    .slice(0, 8);
+  return items.length > 0 ? items : ["Melhorias e correções para o Jurix funcionar melhor."];
+}
+
+// Atualização do app numa janela do Jurix: versão nova, o que mudou e progresso.
+// Windows: baixa e instala ao reiniciar. Mac (sem assinatura da Apple não há
+// instalação automática): abre o download do instalador novo.
 function setupUpdates(win) {
   if (!app.isPackaged) return;
   let autoUpdater;
@@ -80,31 +107,79 @@ function setupUpdates(win) {
     return;
   }
   const mac = process.platform === "darwin";
-  autoUpdater.autoDownload = !mac;
-  autoUpdater.on("update-available", async (info) => {
-    if (!mac) return;
-    const { response } = await dialog.showMessageBox(win, {
-      type: "info",
-      buttons: ["Baixar agora", "Depois"],
-      defaultId: 0,
-      title: "Atualização do Jurix",
-      message: `O Jurix ${info.version} está disponível.`,
-      detail: "Baixe o instalador novo e arraste o Jurix para Aplicativos, substituindo o atual.",
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  let popup = null;
+  let state = null;
+  let dismissedVersion = null;
+  const send = (patch) => {
+    state = { ...state, ...patch };
+    if (popup && !popup.isDestroyed()) popup.webContents.send("update:state", state);
+  };
+  function openPopup() {
+    if (popup && !popup.isDestroyed()) return popup.focus();
+    popup = new BrowserWindow({
+      parent: win,
+      modal: true,
+      width: 440,
+      height: 520,
+      resizable: false,
+      minimizable: false,
+      maximizable: false,
+      frame: false,
+      show: false,
+      backgroundColor: "#ffffff",
+      icon: ICON,
+      webPreferences: {
+        preload: join(__dirname, "preload.cjs"),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
     });
-    if (response === 0) shell.openExternal(RELEASES);
+    popup.loadFile(UPDATE_PAGE);
+    popup.webContents.on("did-finish-load", () => send({}));
+    popup.once("ready-to-show", () => popup.show());
+  }
+
+  ipcMain.handle("update:start", () => {
+    if (mac) {
+      shell.openExternal(RELEASES);
+      popup?.close();
+      return;
+    }
+    send({ phase: "downloading", percent: 0 });
+    autoUpdater.downloadUpdate().catch(() => send({ phase: "error" }));
   });
-  autoUpdater.on("update-downloaded", async (info) => {
-    const { response } = await dialog.showMessageBox(win, {
-      type: "info",
-      buttons: ["Reiniciar agora", "Depois"],
-      defaultId: 0,
-      title: "Atualização do Jurix",
-      message: `A versão ${info.version} do Jurix está pronta.`,
-      detail: "Reinicie para usar. Se escolher depois, ela é instalada quando você fechar o app.",
-    });
-    if (response === 0) autoUpdater.quitAndInstall();
+  ipcMain.handle("update:install", () => autoUpdater.quitAndInstall());
+  ipcMain.handle("update:dismiss", () => {
+    // "Depois" sem baixar: não insiste nesta versão até reabrir o app.
+    if (state?.phase === "available") dismissedVersion = state.version;
+    popup?.close();
   });
-  autoUpdater.on("error", (e) => console.error("[jurix-desktop] atualização:", e.message));
+
+  autoUpdater.on("update-available", (info) => {
+    if (info.version === dismissedVersion || state?.phase === "downloading") return;
+    state = {
+      phase: "available",
+      current: app.getVersion(),
+      version: info.version,
+      notes: releaseNotes(info),
+      manual: mac,
+    };
+    openPopup();
+  });
+  autoUpdater.on("download-progress", (p) =>
+    send({ phase: "downloading", percent: p.percent, transferred: p.transferred, total: p.total }),
+  );
+  autoUpdater.on("update-downloaded", () => {
+    send({ phase: "ready" });
+    openPopup(); // reaparece pronta, mesmo se o usuário fechou durante o download
+  });
+  autoUpdater.on("error", (e) => {
+    console.error("[jurix-desktop] atualização:", e.message);
+    if (state?.phase === "downloading") send({ phase: "error" });
+  });
   const check = () => autoUpdater.checkForUpdates().catch(() => {});
   check();
   setInterval(check, UPDATE_EVERY_MS);
@@ -276,17 +351,33 @@ app.whenReady().then(() => {
     },
   });
 
+  // Cota de cada IA para o seletor do chat: { claude: { windows, updatedAt, limited? }, ... }.
+  // O Codex grava a cota nas próprias sessões; lê já na abertura.
+  const status = {};
+  const codexNow = codexQuota();
+  if (codexNow) status.codex = codexNow;
+
   const worker = createWorker({
     rpc,
-    heartbeat: () => ({ engine, available: Object.keys(installed) }),
+    heartbeat: () => ({ engine, available: Object.keys(installed), status }),
     onPreferred: (name) => {
       preferred = name;
       engine = chooseEngine(installed, preferred, engine);
     },
-    // Motor fixado na hora de pegar a tarefa: trocar de IA não afeta as que já estão rodando.
-    execute: (request) => {
-      const name = engine;
-      return runJob(name, installed[name], request);
+    // A conversa pode pedir uma IA específica (seletor do chat); se ela não estiver
+    // instalada, usa a do computador. Motor fixado na hora de pegar a tarefa.
+    execute: async (request) => {
+      const name = installed[request.engine] ? request.engine : engine;
+      try {
+        const { reply, quota } = await runJob(name, installed[name], request);
+        status[name] = quota || { ...status[name], limited: false };
+        return { ...reply, engine: name };
+      } catch (e) {
+        if (LIMIT_RE.test(e.message)) {
+          status[name] = { ...status[name], limited: true, updatedAt: Date.now() };
+        }
+        throw e;
+      }
     },
   });
 
