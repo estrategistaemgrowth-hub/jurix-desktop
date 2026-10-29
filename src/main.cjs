@@ -257,7 +257,8 @@ app.whenReady().then(() => {
   const setStatus = (text) => {
     if (text === lastStatus || win.isDestroyed()) return;
     lastStatus = text;
-    win.setTitle(`Jurix · IA local: ${text}`);
+    // Na janela só a marca Jurix; o motor (Claude, Codex...) fica no log.
+    win.setTitle(/trabalhando/.test(text) ? "Jurix · Jurix IA trabalhando" : "Jurix");
     console.log(`[jurix-desktop] IA local: ${text}`);
   };
 
@@ -329,11 +330,16 @@ app.whenReady().then(() => {
   // A chave pública (publishable) do Supabase é a mesma que o site manda em toda
   // requisição; o app a pega do tráfego do próprio Jurix em vez de exigir config.
   let apiKey = config.supabaseKey;
+  // Um só listener por sessão (o Electron substitui o anterior): também marca as
+  // chamadas à API do Jurix com X-Jurix-Desktop, para a nuvem usar a IA deste PC.
+  // No navegador comum o cabeçalho não existe e a IA é a do escritório.
   win.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["https://*.supabase.co/*"] },
+    { urls: ["https://*.supabase.co/*", `${appOrigin}/api/*`] },
     (details, callback) => {
-      if (!apiKey && details.requestHeaders.apikey) apiKey = details.requestHeaders.apikey;
-      callback({ requestHeaders: details.requestHeaders });
+      const headers = details.requestHeaders;
+      if (details.url.startsWith(appOrigin)) headers["X-Jurix-Desktop"] = app.getVersion();
+      else if (!apiKey && headers.apikey) apiKey = headers.apikey;
+      callback({ requestHeaders: headers });
     },
   );
 
