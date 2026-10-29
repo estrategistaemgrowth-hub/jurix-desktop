@@ -1,0 +1,71 @@
+{
+  "name": "jurix-desktop",
+  "productName": "Jurix",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Jurix com a IA da assinatura do próprio usuário (Claude, ChatGPT ou Gemini).",
+  "author": "Jurix",
+  "homepage": "https://jurix.work",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/engines.test.cjs test/worker.test.cjs",
+    "smoke": "node test/smoke.cjs",
+    "dist:win": "electron-builder --win --publish never",
+    "dist:mac": "electron-builder --mac --publish never",
+    "release": "electron-builder --publish always"
+  },
+  "dependencies": {
+    "electron-updater": "6.3.9"
+  },
+  "devDependencies": {
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8"
+  },
+  "build": {
+    "appId": "work.jurix.desktop",
+    "productName": "Jurix",
+    "copyright": "Jurix",
+    "directories": { "buildResources": "build", "output": "dist" },
+    "files": ["src/**/*", "build/icon.png", "package.json"],
+    "publish": [
+      { "provider": "github", "owner": "estrategistaemgrowth-hub", "repo": "jurix-desktop" }
+    ],
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "icon": "build/icon.png",
+      "artifactName": "Jurix-Setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "Jurix",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerSidebar": "build/installer-sidebar.bmp",
+      "installerHeaderIcon": "build/icon.ico",
+      "language": "1046",
+      "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["universal"] }],
+      "icon": "build/icon.png",
+      "category": "public.app-category.business",
+      "artifactName": "Jurix.${ext}",
+      "identity": "-"
+    },
+    "dmg": {
+      "title": "Instalar o Jurix",
+      "background": "build/dmg-background.png",
+      "window": { "width": 640, "height": 420 },
+      "contents": [
+        { "x": 170, "y": 220, "type": "file" },
+        { "x": 470, "y": 220, "type": "link", "path": "/Applications" }
+      ]
+    }
+  }
+}

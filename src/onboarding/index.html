@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; script-src 'self' 'unsafe-inline'">
+<title>Jurix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Schibsted+Grotesk:wght@600;700;800&display=swap">
+<style>
+  :root {
+    --ink: #061b31;
+    --ink-2: #0d2a4a;
+    --paper: #f6f5fb;
+    --card: #ffffff;
+    --primary: #7232f1;
+    --primary-hover: #5f22dc;
+    --primary-soft: #efe8fe;
+    --muted: #5b6b80;
+    --line: #e3e1ee;
+    --ok: #0f7b4f;
+    --ease: cubic-bezier(.22,.61,.36,1);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 15px/1.55 "Inter", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    display: grid;
+    grid-template-columns: minmax(340px, 42%) 1fr;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Painel da marca */
+  .brand {
+    position: relative;
+    overflow: hidden;
+    background:
+      radial-gradient(120% 70% at 85% 110%, rgba(114,50,241,.55), transparent 60%),
+      radial-gradient(90% 60% at -10% -10%, rgba(155,116,247,.22), transparent 55%),
+      var(--ink);
+    color: #fff;
+    padding: 48px 44px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .brand::after { /* trama fina: textura sem ruído */
+    content: "";
+    position: absolute; inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px);
+    background-size: 100% 4px;
+    pointer-events: none;
+  }
+  .brand-top { display: flex; align-items: center; gap: 12px; position: relative; z-index: 1; }
+  .brand-top img { width: 40px; height: 40px; border-radius: 10px; }
+  .brand-top span { font: 700 20px/1 "Schibsted Grotesk", sans-serif; letter-spacing: -.01em; }
+  .brand-mark {
+    position: absolute;
+    width: 78%;
+    right: -14%;
+    bottom: 12%;
+    opacity: .9;
+    filter: drop-shadow(0 30px 60px rgba(114,50,241,.45));
+    animation: float 9s var(--ease) infinite alternate;
+  }
+  .brand-quote { position: relative; z-index: 1; max-width: 30ch; }
+  .brand-quote p { font: 600 22px/1.3 "Schibsted Grotesk", sans-serif; margin: 0 0 10px; letter-spacing: -.01em; }
+  .brand-quote small { color: rgba(255,255,255,.62); font-size: 13px; }
+
+  /* Conteúdo */
+  main { display: flex; align-items: center; justify-content: center; padding: 48px 56px; }
+  .step { width: 100%; max-width: 520px; display: none; }
+  .step.active { display: block; animation: rise .62s var(--ease) both; }
+  .kicker {
+    display: inline-block;
+    font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--primary); background: var(--primary-soft);
+    padding: 5px 10px; border-radius: 999px; margin-bottom: 20px;
+  }
+  h1 {
+    font: 800 clamp(30px, 3.4vw, 44px)/1.06 "Schibsted Grotesk", sans-serif;
+    letter-spacing: -.025em; margin: 0 0 16px; text-wrap: balance;
+  }
+  h1 em { font-style: normal; color: var(--primary); }
+  .lead { color: var(--muted); font-size: 18px; line-height: 1.5; margin: 0 0 32px; max-width: 44ch; text-wrap: pretty; }
+
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  button, .btn {
+    font: 600 15px/1 "Inter", sans-serif;
+    border-radius: 12px; border: 0; cursor: pointer;
+    padding: 15px 22px;
+    transition: transform .18s var(--ease), box-shadow .18s var(--ease), background .18s var(--ease);
+  }
+  .btn-primary { background: var(--primary); color: #fff; box-shadow: 0 10px 24px -10px rgba(114,50,241,.7); }
+  .btn-primary:hover { background: var(--primary-hover); transform: translateY(-2px); box-shadow: 0 16px 30px -12px rgba(114,50,241,.75); }
+  .btn-ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  .btn-ghost:hover { background: #fff; transform: translateY(-2px); }
+  .btn-link { background: none; color: var(--muted); padding: 15px 6px; font-weight: 500; }
+  .btn-link:hover { color: var(--ink); }
+  button:focus-visible { outline: 3px solid rgba(114,50,241,.45); outline-offset: 2px; }
+
+  .facts { margin: 40px 0 0; padding: 22px 0 0; border-top: 1px solid var(--line); display: grid; gap: 14px; }
+  .fact { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; }
+  .fact b { font: 700 13px/30px "Schibsted Grotesk", sans-serif; color: var(--primary); background: var(--primary-soft); border-radius: 8px; text-align: center; }
+  .fact p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+  .fact p strong { color: var(--ink); font-weight: 600; }
+
+  /* Etapa da IA */
+  .engines { display: grid; gap: 10px; margin: 0 0 22px; }
+  .engine {
+    display: grid; grid-template-columns: 44px 1fr auto; gap: 14px; align-items: center;
+    background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 14px 16px;
+    transition: border-color .18s var(--ease), box-shadow .18s var(--ease);
+  }
+  .engine.found { border-color: rgba(15,123,79,.35); box-shadow: 0 1px 0 rgba(15,123,79,.08); }
+  .engine-badge {
+    width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+    font: 800 17px/1 "Schibsted Grotesk", sans-serif; color: var(--ink); background: #f1f0f6;
+  }
+  .engine.found .engine-badge { background: #e6f4ee; color: var(--ok); }
+  .engine-name { font-weight: 600; }
+  .engine-meta { font-size: 13px; color: var(--muted); }
+  .engine-state { font-size: 13px; font-weight: 600; color: var(--ok); margin-left: 6px; }
+  .engine-actions { display: flex; gap: 6px; }
+  .engine-actions button { padding: 10px 14px; font-size: 13px; border-radius: 10px; }
+  .note { font-size: 13px; color: var(--muted); margin: 0 0 26px; }
+  .scan-line { font-size: 13px; color: var(--muted); min-height: 20px; margin: -10px 0 18px; }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes float { from { transform: translateY(0) rotate(-2deg); } to { transform: translateY(-14px) rotate(1deg); } }
+  @media (prefers-reduced-motion: reduce) { .step.active, .brand-mark { animation: none; } button { transition: none; } }
+  @media (max-width: 860px) {
+    body { grid-template-columns: 1fr; }
+    .brand { display: none; }
+    main { padding: 32px 22px; }
+  }
+</style>
+</head>
+<body>
+  <aside class="brand" aria-hidden="true">
+    <div class="brand-top"><img src="../../build/icon.png" alt=""><span>Jurix</span></div>
+    <img class="brand-mark" src="../../build/icon.png" alt="">
+    <div class="brand-quote">
+      <p>O escritório inteiro no seu computador.</p>
+      <small>Processos, prazos, publicações e documentos sincronizados com a nuvem do Jurix.</small>
+    </div>
+  </aside>
+
+  <main>
+    <section class="step" id="step-welcome" aria-labelledby="welcome-title">
+      <span class="kicker">Jurix para computador</span>
+      <h1 id="welcome-title">O Jurix que você já usa, agora com <em>a IA da sua assinatura</em>.</h1>
+      <p class="lead">Tudo o que você faz aqui fica salvo na nuvem do Jurix e aparece igual no navegador e no celular.</p>
+      <div class="actions">
+        <button class="btn-primary" data-account="signup" type="button">Criar conta grátis</button>
+        <button class="btn-ghost" data-account="login" type="button">Já tenho conta</button>
+      </div>
+      <div class="facts">
+        <div class="fact"><b>1</b><p><strong>Conta e teste grátis</strong> no mesmo cadastro do site: entre com o e-mail de sempre.</p></div>
+        <div class="fact"><b>2</b><p><strong>IA opcional:</strong> conecte o Claude, o ChatGPT ou o Gemini que você já assina, ou use a IA do Jurix.</p></div>
+      </div>
+    </section>
+
+    <section class="step" id="step-ai" aria-labelledby="ai-title">
+      <span class="kicker">Último passo</span>
+      <h1 id="ai-title">Conecte a IA que <em>você já assina</em>.</h1>
+      <p class="lead">O Jurix usa o Claude, o ChatGPT ou o Gemini instalado neste computador para responder no Lex, na Jurix IA e nas análises, sem custo de API.</p>
+      <div class="engines" id="engines"></div>
+      <p class="scan-line" id="scan-line" role="status" aria-live="polite"></p>
+      <p class="note">Depois de instalar, faça o login com a sua conta na janela que abrir e clique em <strong>Procurar de novo</strong>. Dá para trocar a IA quando quiser em Configurações &gt; Assistente IA.</p>
+      <div class="actions">
+        <button class="btn-primary" id="ai-continue" type="button">Continuar</button>
+        <button class="btn-ghost" id="ai-rescan" type="button">Procurar de novo</button>
+        <button class="btn-link" id="ai-skip" type="button">Pular e usar a IA do Jurix</button>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const api = window.jurixDesktop;
+  const ENGINES = [
+    { id: "claude", name: "Claude", tool: "Claude Code", badge: "Cl" },
+    { id: "codex", name: "ChatGPT", tool: "Codex", badge: "Gp" },
+    { id: "agy", name: "Gemini", tool: "Antigravity", badge: "Ge" },
+  ];
+  const step = new URLSearchParams(location.search).get("step") === "ai" ? "ai" : "welcome";
+  document.getElementById(`step-${step}`).classList.add("active");
+
+  document.querySelectorAll("[data-account]").forEach((button) =>
+    button.addEventListener("click", () => api.startAccount(button.dataset.account)),
+  );
+
+  async function render(message) {
+    const found = await api.scanEngines();
+    const list = document.getElementById("engines");
+    list.innerHTML = "";
+    for (const engine of ENGINES) {
+      const ok = found.includes(engine.id);
+      const row = document.createElement("div");
+      row.className = `engine${ok ? " found" : ""}`;
+      row.innerHTML = `
+        <div class="engine-badge">${engine.badge}</div>
+        <div>
+          <div class="engine-name">${engine.name}${ok ? '<span class="engine-state">Instalado</span>' : ""}</div>
+          <div class="engine-meta">via ${engine.tool}</div>
+        </div>
+        <div class="engine-actions"></div>`;
+      const actions = row.querySelector(".engine-actions");
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = ok ? "btn-ghost" : "btn-primary";
+      button.textContent = ok ? "Fazer login" : "Instalar";
+      button.addEventListener("click", () =>
+        ok ? api.openLogin(engine.id) : api.openInstallPage(engine.id),
+      );
+      actions.append(button);
+      list.append(row);
+    }
+    document.getElementById("ai-continue").textContent = found.length ? "Continuar" : "Continuar sem IA própria";
+    document.getElementById("scan-line").textContent =
+      message ?? (found.length ? `${found.length} de 3 encontradas neste computador.` : "Nenhuma encontrada ainda.");
+  }
+
+  if (step === "ai") {
+    render();
+    document.getElementById("ai-rescan").addEventListener("click", async () => {
+      document.getElementById("scan-line").textContent = "Procurando…";
+      await render();
+    });
+    document.getElementById("ai-continue").addEventListener("click", () => api.finishAiStep());
+    document.getElementById("ai-skip").addEventListener("click", () => api.finishAiStep());
+  }
+</script>
+</body>
+</html>
