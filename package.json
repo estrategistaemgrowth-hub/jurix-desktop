@@ -1,7 +1,7 @@
 {
   "name": "jurix-desktop",
   "productName": "Jurix",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Jurix com a IA da assinatura do próprio usuário (Claude, ChatGPT ou Gemini).",
   "author": "Jurix",
@@ -42,9 +42,9 @@
       "artifactName": "Jurix-Setup.${ext}"
     },
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
+      "runAfterFinish": true,
       "createDesktopShortcut": "always",
       "createStartMenuShortcut": true,
       "shortcutName": "Jurix",

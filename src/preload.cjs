@@ -7,9 +7,9 @@ if (location.protocol === "file:") {
   contextBridge.exposeInMainWorld("jurixDesktop", {
     platform: process.platform,
     scanEngines: () => ipcRenderer.invoke("onboarding:scan"),
+    engineStatus: () => ipcRenderer.invoke("onboarding:status"),
     openInstallPage: (engine) => ipcRenderer.invoke("onboarding:install", engine),
     openLogin: (engine) => ipcRenderer.invoke("onboarding:login", engine),
-    startAccount: (mode) => ipcRenderer.invoke("onboarding:account", mode),
     finishAiStep: () => ipcRenderer.invoke("onboarding:finish-ai"),
   });
 }

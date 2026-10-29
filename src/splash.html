@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self'">
+<title>Jurix</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@800&display=swap">
+<style>
+  :root { --ink: #061b31; --primary: #7232f1; --ease: cubic-bezier(.22,.61,.36,1); }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background:
+      radial-gradient(70% 60% at 50% 115%, rgba(114,50,241,.5), transparent 70%),
+      radial-gradient(50% 40% at 50% 40%, rgba(114,50,241,.18), transparent 70%),
+      var(--ink);
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    color: #fff;
+  }
+  .stage { display: grid; justify-items: center; gap: 22px; }
+  .mark {
+    width: 112px; height: 112px; border-radius: 26px;
+    box-shadow: 0 24px 60px -18px rgba(114,50,241,.75);
+    animation: enter .9s var(--ease) both, breathe 2.8s var(--ease) .9s infinite alternate;
+  }
+  .word {
+    font: 800 34px/1 "Schibsted Grotesk", system-ui, sans-serif;
+    letter-spacing: -.02em;
+    animation: rise .7s var(--ease) .25s both;
+  }
+  .bar {
+    width: 160px; height: 3px; border-radius: 3px; overflow: hidden;
+    background: rgba(255,255,255,.12);
+    animation: rise .7s var(--ease) .4s both;
+  }
+  .bar::after {
+    content: ""; display: block; width: 40%; height: 100%; border-radius: 3px;
+    background: linear-gradient(90deg, transparent, #b89bff, transparent);
+    animation: sweep 1.3s var(--ease) infinite;
+  }
+  @keyframes enter { from { opacity: 0; transform: scale(.82) rotate(-8deg); } to { opacity: 1; transform: none; } }
+  @keyframes breathe { from { transform: scale(1); } to { transform: scale(1.04); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  @keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(260%); } }
+  @media (prefers-reduced-motion: reduce) {
+    .mark, .word, .bar, .bar::after { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="stage" role="status" aria-label="Abrindo o Jurix">
+    <img class="mark" src="../build/icon.png" alt="">
+    <div class="word">Jurix</div>
+    <div class="bar"></div>
+  </div>
+</body>
+</html>

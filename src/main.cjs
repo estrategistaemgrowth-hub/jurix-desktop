@@ -2,10 +2,9 @@
 // Login, telas e regras são os da nuvem; o app só executa as tarefas de IA do
 // usuário logado na assinatura dele (Claude Code, Codex ou Antigravity).
 const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
-const { spawn } = require("node:child_process");
 const { readFileSync, writeFileSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
-const { ENGINES, findEngine, runJob } = require("./engines.cjs");
+const { ENGINES, findEngine, runJob, loginStatus, startLogin } = require("./engines.cjs");
 const { createRpc, createWorker } = require("./worker.cjs");
 
 const TICK_MS = 2_000;
@@ -13,16 +12,16 @@ const RESCAN_EVERY_MS = 15_000; // mesmo ritmo do heartbeat: "Localizar IAs" na 
 const UPDATE_EVERY_MS = 6 * 60 * 60 * 1000;
 const ICON = join(__dirname, "..", "build", "icon.png");
 const ONBOARDING = join(__dirname, "onboarding", "index.html");
+const SPLASH = join(__dirname, "splash.html");
 const ENGINE_LABEL = { claude: "Claude", codex: "ChatGPT", agy: "Gemini" };
 const RELEASES = "https://github.com/estrategistaemgrowth-hub/jurix-desktop/releases/latest";
 
-// Onde instalar e como fazer login em cada IA (páginas oficiais e comando de login do CLI).
+// Páginas oficiais de instalação de cada IA.
 const INSTALL_PAGES = {
   claude: "https://docs.claude.com/pt/docs/claude-code/setup",
   codex: "https://developers.openai.com/codex/cli",
   agy: "https://antigravity.google",
 };
-const LOGIN_COMMANDS = { claude: "claude", codex: "codex login", agy: "agy" };
 
 // Ícone e grupo próprios na barra de tarefas do Windows (senão aparece o do Electron).
 if (process.platform === "win32") app.setAppUserModelId("work.jurix.desktop");
@@ -68,21 +67,6 @@ function scanEngines() {
 // Ordem: a escolhida pelo usuário em Configurações, a da config/env, a atual, a primeira encontrada.
 function chooseEngine(installed, ...wishes) {
   return wishes.find((name) => name && installed[name]) || Object.keys(installed)[0] || null;
-}
-
-// Abre um terminal com o login do CLI: é ele quem abre o navegador na conta do usuário.
-function openLoginTerminal(command) {
-  if (process.platform === "win32") {
-    spawn("cmd.exe", ["/c", "start", "Login da IA", "cmd", "/k", command], {
-      detached: true,
-      windowsHide: false,
-    }).unref();
-  } else if (process.platform === "darwin") {
-    spawn("osascript", ["-e", `tell application "Terminal" to do script "${command}"`, "-e",
-      'tell application "Terminal" to activate']).unref();
-  } else {
-    spawn("x-terminal-emulator", ["-e", command], { detached: true }).unref();
-  }
 }
 
 // Atualização do app: no Windows baixa e instala ao reiniciar; no Mac (sem assinatura
@@ -171,9 +155,26 @@ app.whenReady().then(() => {
     return { action: url.startsWith(appOrigin) ? "allow" : "deny" };
   });
 
-  const state = readState();
-  if (state.welcomed) win.loadURL(config.appUrl);
-  else win.loadFile(ONBOARDING, { query: { step: "welcome" } });
+  // O app abre direto no login do Jurix (que manda para o /dashboard quem já está
+  // logado), passando pela tela de abertura animada em vez de piscar em branco.
+  const AUTH_URL = `${config.appUrl}/auth`;
+  win.loadFile(SPLASH);
+  win.webContents.once("did-finish-load", () => win.loadURL(AUTH_URL));
+
+  // A landing page não aparece no app (ex.: depois de sair da conta): volta pro login.
+  const isLanding = (url) => {
+    try {
+      const u = new URL(url);
+      return u.origin === appOrigin && (u.pathname === "/" || u.pathname === "");
+    } catch {
+      return false;
+    }
+  };
+  const skipLanding = (_e, url) => {
+    if (isLanding(url)) win.loadURL(AUTH_URL);
+  };
+  win.webContents.on("did-navigate", skipLanding);
+  win.webContents.on("did-navigate-in-page", skipLanding);
 
   setupUpdates(win);
 
@@ -203,17 +204,29 @@ app.whenReady().then(() => {
   ipcMain.handle("onboarding:install", (_e, name) => {
     if (INSTALL_PAGES[name]) shell.openExternal(INSTALL_PAGES[name]);
   });
-  ipcMain.handle("onboarding:login", (_e, name) => {
-    if (LOGIN_COMMANDS[name] && installed[name]) openLoginTerminal(LOGIN_COMMANDS[name]);
+  // Estado de cada IA: instalada? conta conectada? (para a tela mostrar "Conectado").
+  ipcMain.handle("onboarding:status", async () => {
+    rescan();
+    const entries = await Promise.all(
+      ENGINES.map(async (name) => [
+        name,
+        installed[name]
+          ? { installed: true, ...(await loginStatus(name, installed[name])) }
+          : { installed: false, connected: false },
+      ]),
+    );
+    return Object.fromEntries(entries);
   });
-  ipcMain.handle("onboarding:account", (_e, mode) => {
-    saveState({ welcomed: true });
-    win.loadURL(`${config.appUrl}/auth${mode === "signup" ? "?mode=signup" : ""}`);
+  // Login em segundo plano: sem terminal; o navegador abre na página de login da conta.
+  ipcMain.handle("onboarding:login", async (_e, name) => {
+    if (!installed[name]) return { connected: false };
+    await startLogin(name, installed[name], (url) => shell.openExternal(url));
+    return loginStatus(name, installed[name]);
   });
   ipcMain.handle("onboarding:finish-ai", () => {
     saveState({ aiStepDone: true });
     rescan();
-    win.loadURL(config.appUrl);
+    win.loadURL(`${config.appUrl}/dashboard`);
   });
 
   // Sessão do Supabase que o próprio Jurix web grava no localStorage (sb-<ref>-auth-token).
@@ -235,7 +248,7 @@ app.whenReady().then(() => {
     if (!session?.token || readState().aiStepDone) return;
     const path = new URL(win.webContents.getURL()).pathname;
     if (["/auth", "/login", "/boas-vindas"].some((p) => path.startsWith(p))) return;
-    win.loadFile(ONBOARDING, { query: { step: "ai" } });
+    win.loadFile(ONBOARDING);
   }
 
   // A chave pública (publishable) do Supabase é a mesma que o site manda em toda

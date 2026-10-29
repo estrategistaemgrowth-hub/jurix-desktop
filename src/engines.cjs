@@ -238,6 +238,74 @@ async function runAgy(path, { system, prompt }) {
 
 const RUNNERS = { claude: runClaude, codex: runCodex, agy: runAgy };
 
+const quiet = (path, args, input, timeoutMs) =>
+  Promise.race([
+    run(command(path, args), input),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), timeoutMs)),
+  ]);
+
+/**
+ * A conta está logada? { connected, account? }. Sem janela, sem custo de IA
+ * (no Antigravity, que não tem comando de status, é uma pergunta mínima).
+ */
+async function loginStatus(engine, path) {
+  try {
+    if (engine === "claude") {
+      const j = JSON.parse(await quiet(path, ["auth", "status"], "", 20_000));
+      return { connected: j.loggedIn === true, account: j.email || undefined };
+    }
+    if (engine === "codex") {
+      const out = await quiet(path, ["login", "status"], "", 20_000);
+      return { connected: /logged in/i.test(out) && !/not logged in/i.test(out) };
+    }
+    const out = await quiet(
+      path,
+      ["-p", "Responda apenas: ok", "--output-format", "json", "--mode", "plan", "--disable-slash-commands"],
+      "",
+      40_000,
+    );
+    return { connected: JSON.parse(out).status === "SUCCESS" };
+  } catch {
+    return { connected: false };
+  }
+}
+
+const LOGIN_ARGS = {
+  claude: ["auth", "login", "--claudeai"],
+  codex: ["login"],
+  // Sem comando de login: a primeira chamada pede a conta Google no navegador.
+  agy: ["-p", "Responda apenas: ok", "--output-format", "json", "--mode", "plan", "--disable-slash-commands"],
+};
+const LOGIN_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Login em segundo plano (sem terminal). O CLI abre o navegador; se ele só
+ * imprimir o link, onUrl(link) deixa o app abrir. Resolve quando o CLI termina.
+ */
+function startLogin(engine, path, onUrl) {
+  return new Promise((resolve) => {
+    const { cmd, args, env } = command(path, LOGIN_ARGS[engine]);
+    const p = spawn(cmd, args, { env: cleanEnv(env), cwd: tmpdir(), windowsHide: true });
+    let opened = false;
+    const watch = (d) => {
+      const url = String(d).match(/https:\/\/\S+/)?.[0];
+      if (url && !opened) {
+        opened = true;
+        onUrl(url);
+      }
+    };
+    const timer = setTimeout(() => p.kill(), LOGIN_TIMEOUT_MS);
+    p.stdout.on("data", watch);
+    p.stderr.on("data", watch);
+    p.on("error", () => resolve(false));
+    p.on("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0);
+    });
+    p.stdin.end();
+  });
+}
+
 /** Executa uma tarefa do Jurix (request da fila) no motor escolhido. */
 async function runJob(engine, path, request) {
   const built = buildPrompt(request);
@@ -246,4 +314,12 @@ async function runJob(engine, path, request) {
   return usage ? { ...reply, usage } : reply;
 }
 
-module.exports = { ENGINES, findEngine, buildPrompt, parseToolReply, runJob };
+module.exports = {
+  ENGINES,
+  findEngine,
+  buildPrompt,
+  parseToolReply,
+  runJob,
+  loginStatus,
+  startLogin,
+};

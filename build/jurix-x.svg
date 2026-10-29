@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="815 45 235 210" role="img" aria-labelledby="title desc">
+  <title id="title">X do Jurix</title>
+  <desc id="desc">Símbolo X oficial do Jurix com gradientes roxos e fundo transparente.</desc>
+  <defs>
+    <linearGradient id="jurix-main" x1="1015.86" y1="44.83" x2="847.07" y2="259.74" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5749f7"/>
+      <stop offset=".37" stop-color="#604cdd"/>
+      <stop offset="1" stop-color="#36115c"/>
+    </linearGradient>
+    <linearGradient id="jurix-top" x1="839.63" y1="47.19" x2="910.49" y2="127.07" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5d50f8"/>
+      <stop offset=".42" stop-color="#614cdd"/>
+      <stop offset="1" stop-color="#39115c"/>
+    </linearGradient>
+    <linearGradient id="jurix-bottom" x1="951.24" y1="176.27" x2="1022.37" y2="254.68" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#330f52"/>
+      <stop offset=".19" stop-color="#4a2893"/>
+      <stop offset=".58" stop-color="#624fe1"/>
+      <stop offset="1" stop-color="#6054f4"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#jurix-main)" d="M868.3,246.05c-1.14-.17-2.17.16-3.05.9l-43.06-.13,40.46-45.67,29.24-32.35,35.97-42.79,49.77-58.72c5.9-6.96,14.56-10.81,23.7-10.66l39.76.67-104.25,121.04-50.11,56.66c-5.07,5.73-11.32,8.94-18.42,11.04Z"/>
+  <path fill="url(#jurix-top)" d="M925.06,115.93c-2.74,8.11-10.04,12.79-17.04,15.46-12.1,4.61-21.89-.65-29.81-9.7l-56.56-64.61,39.46-.53c9.42-.13,17.83,3.44,23.82,10.7l40.14,48.69Z"/>
+  <path fill="url(#jurix-bottom)" d="M1002.68,247.28c-9.93-.02-18.13-4.24-24.19-11.36l-37.37-43.89c-2.27-2.66-1.83-4.75.12-7.5,7.41-10.49,21.57-16.33,33.53-9.95,5.51,2.94,9.1,8.38,13.26,13l50.92,56.62c.56.62.68,1.47.52,1.86-.21.51-.97,1.28-2.05,1.27l-34.75-.06Z"/>
+  <path fill="#421f7d" d="M868.3,246.05l-3.05.9c.73-1.44,2.26-1.47,3.05-.9Z"/>
+</svg>
