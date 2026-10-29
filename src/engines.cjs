@@ -42,6 +42,12 @@ const CANDIDATES = {
   ],
   codex: [
     win && join(npmGlobal, "@openai", "codex", "bin", "codex.js"),
+    // Instalador oficial (install.ps1 / install.sh): fora do npm, e o PATH novo só
+    // vale para programas abertos depois da instalação, então não dá pra contar com ele.
+    win && join(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe"),
+    join(home, ".codex", "packages", "standalone", "current", "bin", win ? "codex.exe" : "codex"),
+    join(home, ".codex", "packages", "standalone", "current", win ? "codex.exe" : "codex"),
+    !win && join(home, ".local", "bin", "codex"),
     !win && "/opt/homebrew/lib/node_modules/@openai/codex/bin/codex.js",
     !win && "/usr/local/lib/node_modules/@openai/codex/bin/codex.js",
     !win && "/opt/homebrew/bin/codex",
