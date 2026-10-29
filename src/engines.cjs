@@ -11,6 +11,20 @@ const ENGINES = ["claude", "codex", "agy"];
 const AGY_MAX_PROMPT_CHARS = 30_000;
 const RUN_TIMEOUT_MS = 170_000; // um pouco abaixo dos 180 s que o servidor espera
 
+// O Jurix só precisa de TEXTO dos CLIs: tudo que deixa o agente agir na máquina fica
+// desligado (nada de terminal, navegador, conectores ou MCP do usuário).
+// Codex: sem shell, sem navegador, sem apps e sem os servidores MCP da config do usuário.
+const CODEX_LOCKDOWN_ARGS = [
+  "--disable", "shell_tool",
+  "--disable", "unified_exec",
+  "--disable", "browser_use",
+  "--disable", "apps",
+  "-c", "mcp_servers={}",
+];
+// Antigravity: modo plano (sem editar) e sandbox de terminal. Sem --disable-slash-commands:
+// ele anula o --mode plan; o prompt nunca começa com "/" (vem depois das instruções).
+const AGY_SAFE_ARGS = ["--output-format", "json", "--mode", "plan", "--sandbox"];
+
 const home = homedir();
 const win = process.platform === "win32";
 const appData = process.env.APPDATA || join(home, "AppData", "Roaming");
@@ -197,6 +211,7 @@ async function runCodex(path, { system, prompt }) {
         "--ephemeral",
         "--sandbox",
         "read-only",
+        ...CODEX_LOCKDOWN_ARGS,
         "-o",
         file,
         "-",
@@ -215,17 +230,7 @@ async function runAgy(path, { system, prompt }) {
     // Erro explícito: o servidor cai na API em vez de mandar o texto cortado.
     throw new Error("Conteúdo grande demais para o Antigravity; use Claude ou Codex.");
   }
-  const out = await run(
-    command(path, [
-      "-p",
-      full,
-      "--output-format",
-      "json",
-      "--mode",
-      "plan",
-      "--disable-slash-commands",
-    ]),
-  );
+  const out = await run(command(path, ["-p", full, ...AGY_SAFE_ARGS]));
   const j = JSON.parse(out);
   if (j.status !== "SUCCESS") throw new Error(j.response || j.status);
   return {
@@ -258,12 +263,7 @@ async function loginStatus(engine, path) {
       const out = await quiet(path, ["login", "status"], "", 20_000);
       return { connected: /logged in/i.test(out) && !/not logged in/i.test(out) };
     }
-    const out = await quiet(
-      path,
-      ["-p", "Responda apenas: ok", "--output-format", "json", "--mode", "plan", "--disable-slash-commands"],
-      "",
-      40_000,
-    );
+    const out = await quiet(path, ["-p", "Responda apenas: ok", ...AGY_SAFE_ARGS], "", 40_000);
     return { connected: JSON.parse(out).status === "SUCCESS" };
   } catch {
     return { connected: false };
@@ -274,7 +274,7 @@ const LOGIN_ARGS = {
   claude: ["auth", "login", "--claudeai"],
   codex: ["login"],
   // Sem comando de login: a primeira chamada pede a conta Google no navegador.
-  agy: ["-p", "Responda apenas: ok", "--output-format", "json", "--mode", "plan", "--disable-slash-commands"],
+  agy: ["-p", "Responda apenas: ok", ...AGY_SAFE_ARGS],
 };
 const LOGIN_TIMEOUT_MS = 5 * 60_000;
 
