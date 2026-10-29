@@ -29,7 +29,12 @@
     "directories": { "buildResources": "build", "output": "dist" },
     "files": ["src/**/*", "build/icon.png", "package.json"],
     "publish": [
-      { "provider": "github", "owner": "estrategistaemgrowth-hub", "repo": "jurix-desktop" }
+      {
+        "provider": "github",
+        "owner": "estrategistaemgrowth-hub",
+        "repo": "jurix-desktop",
+        "releaseType": "release"
+      }
     ],
     "win": {
       "target": [{ "target": "nsis", "arch": ["x64"] }],
@@ -53,7 +58,7 @@
     },
     "mac": {
       "target": [{ "target": "dmg", "arch": ["universal"] }],
-      "icon": "build/icon.png",
+      "icon": "build/icon-1024.png",
       "category": "public.app-category.business",
       "artifactName": "Jurix.${ext}",
       "identity": "-"

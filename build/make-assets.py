@@ -1,7 +1,8 @@
 """Gera as artes do instalador a partir do ícone do Jurix.
 
 Uso: python desktop/build/make-assets.py [caminho/da/fonte-de-titulo.ttf]
-Saídas (nesta pasta): icon.ico, installer-sidebar.bmp (Windows), dmg-background.png e @2x (Mac).
+Saídas (nesta pasta): icon.ico, installer-sidebar.bmp (Windows), icon-1024.png,
+dmg-background.png e @2x (Mac).
 """
 import sys
 from pathlib import Path
@@ -46,6 +47,8 @@ def main():
     icon = Image.open(HERE / "icon.png").convert("RGBA")
 
     icon.save(HERE / "icon.ico", sizes=[(s, s) for s in (16, 24, 32, 48, 64, 128, 256)])
+    # O Mac exige ícone de pelo menos 512x512; o icon.png do site tem 500x500.
+    icon.resize((1024, 1024), Image.LANCZOS).save(HERE / "icon-1024.png")
 
     # Lateral das telas do instalador do Windows: 164x314, BMP 24 bits.
     side = ink_background(164, 314, (150, 330))
