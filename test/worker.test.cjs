@@ -148,3 +148,24 @@ test("RPC usa o token e a chave pública do usuário; sem sessão não chama nad
   assert.equal(requests[0].init.headers.Authorization, "Bearer user-jwt");
   assert.equal(requests[0].init.headers.apikey, "pub-key");
 });
+
+test("texto parcial vai para a fila agrupado, só o mais recente", async () => {
+  const { rpc, calls } = fakeRpc([{ id: "job-1", request: {} }]);
+  const worker = createWorker({
+    rpc,
+    heartbeat: claudeOnly,
+    execute: async (_request, onPartial) => {
+      onPartial("Você");
+      onPartial("Você tem");
+      await new Promise((r) => setTimeout(r, 400));
+      onPartial("Você tem 128 processos.");
+      return { content: "Você tem 128 processos." };
+    },
+    log: silent,
+  });
+  await worker.tick();
+  await worker.drain();
+  const partials = calls.filter(([fn]) => fn === "progress_local_ai_job").map(([, b]) => b.p_partial);
+  assert.deepEqual(partials, ["Você tem"]); // o último pedaço chega junto com a resposta final
+  assert.equal(calls.at(-1)[0], "complete_local_ai_job");
+});

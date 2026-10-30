@@ -230,9 +230,10 @@ const TOOL_PROTOCOL = [
   "FERRAMENTAS DISPONÍVEIS (formato JSON Schema):",
   "%TOOLS%",
   "",
-  "Responda SOMENTE com um objeto JSON, sem texto fora dele, em um destes formatos:",
-  '- Para consultar dados antes de responder: {"tool_calls":[{"name":"<ferramenta>","arguments":{...}}]}',
-  '- Para responder ao usuário: {"content":"<resposta final>"}',
+  "Para consultar dados antes de responder, responda SOMENTE com este JSON, sem nenhum texto fora dele:",
+  '{"tool_calls":[{"name":"<ferramenta>","arguments":{...}}]}',
+  // Texto normal (não JSON) pode ir aparecendo na tela enquanto é escrito.
+  "Para responder ao usuário, escreva só a resposta final, em texto normal (nunca em JSON).",
   "Use ferramenta quando a resposta depender de dados que ainda não estão na conversa.",
 ].join("\n");
 
@@ -364,13 +365,37 @@ function isQuick(request) {
   return text.length > 0 && text.length <= 400 && !DRAFTING_RE.test(text);
 }
 
-async function runClaude(path, { system, prompt, quick, warmable }) {
+/** Texto que o Claude vai escrevendo (eventos text_delta do stream-json). */
+function claudeTextStream(onPartial) {
+  let buffer = "";
+  let text = "";
+  return (d) => {
+    buffer += d;
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
+    for (const line of lines) {
+      if (!line.includes('"text_delta"')) continue;
+      try {
+        const piece = JSON.parse(line).event?.delta?.text;
+        if (typeof piece !== "string") continue;
+        text += piece;
+        // JSON é pedido de ferramenta: não é texto para o usuário.
+        if (!text.trimStart().startsWith("{")) onPartial(text);
+      } catch {
+        // linha que não é evento: ignora
+      }
+    }
+  };
+}
+
+async function runClaude(path, { system, prompt, quick, warmable, onPartial }) {
   const args = [
     "-p",
     "--input-format",
     "stream-json", // a pergunta entra pelo stdin depois: permite subir o processo antes
     "--output-format",
     "stream-json", // traz o evento de cota (rate_limit_event) junto com o resultado
+    "--include-partial-messages", // texto aos pedaços: a tela mostra a resposta aparecendo
     "--verbose",
     "--no-session-persistence",
     "--model",
@@ -383,11 +408,9 @@ async function runClaude(path, { system, prompt, quick, warmable }) {
     system || "Responda em português do Brasil.",
   ];
   const message = { type: "user", message: { role: "user", content: prompt } };
-  const out = await finishOn(
-    claudeProcess(path, args, warmable),
-    `${JSON.stringify(message)}\n`,
-    '"type":"result"',
-  );
+  const proc = claudeProcess(path, args, warmable);
+  if (onPartial) proc.p.stdout.on("data", claudeTextStream(onPartial));
+  const out = await finishOn(proc, `${JSON.stringify(message)}\n`, '"type":"result"');
   const events = out
     .split("\n")
     .filter((l) => l.trim().startsWith("{"))
@@ -521,12 +544,14 @@ const LIMIT_RE =
 /**
  * Executa uma tarefa do Jurix (request da fila) no motor escolhido.
  * { reply, quota }: quota (ou null) é a leitura mais recente da cota desse motor.
+ * onPartial(texto até agora): só o Claude manda a resposta aos pedaços.
  */
-async function runJob(engine, path, request) {
+async function runJob(engine, path, request, onPartial) {
   const built = buildPrompt(request);
   const { text, usage, quota = null } = await RUNNERS[engine](path, {
     ...built,
     quick: isQuick(request),
+    onPartial,
   });
   const reply = built.hasTools ? parseToolReply(text) : { content: text.trim() };
   return { reply: usage ? { ...reply, usage } : reply, quota };

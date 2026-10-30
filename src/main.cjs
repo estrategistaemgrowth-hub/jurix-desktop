@@ -373,10 +373,10 @@ app.whenReady().then(() => {
     },
     // A conversa pode pedir uma IA específica (seletor do chat); se ela não estiver
     // instalada, usa a do computador. Motor fixado na hora de pegar a tarefa.
-    execute: async (request) => {
+    execute: async (request, onPartial) => {
       const name = installed[request.engine] ? request.engine : engine;
       try {
-        const { reply, quota } = await runJob(name, installed[name], request);
+        const { reply, quota } = await runJob(name, installed[name], request, onPartial);
         status[name] = quota || { ...status[name], limited: false };
         return { ...reply, engine: name };
       } catch (e) {

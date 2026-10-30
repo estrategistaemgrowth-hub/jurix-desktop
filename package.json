@@ -1,7 +1,7 @@
 {
   "name": "jurix-desktop",
   "productName": "Jurix",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "private": true,
   "description": "Jurix com a IA da assinatura do próprio usuário (Claude, ChatGPT ou Gemini).",
   "author": "Jurix",

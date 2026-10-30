@@ -1,9 +1,11 @@
 // Laço do Jurix Desktop: avisa o servidor que está online, pega as tarefas de IA
-// do usuário logado e devolve as respostas. Só fala com o banco pelas três RPCs
-// da migration local_ai_bridge, sempre com o token da sessão do próprio usuário.
+// do usuário logado e devolve as respostas. Só fala com o banco pelas RPCs das
+// migrations local_ai_* (fila, batida e texto parcial), sempre com o token da
+// sessão do próprio usuário.
 
 const HEARTBEAT_EVERY_MS = 15_000; // servidor considera online até 45 s sem sinal
 const MAX_PARALLEL = 3; // Raio-X de contrato manda até 3 blocos ao mesmo tempo
+const PROGRESS_EVERY_MS = 300; // o servidor lê a fila a cada 400 ms
 
 /** Chamadas REST às RPCs do Supabase com o token do usuário. getAuth → { token, supabaseUrl }. */
 function createRpc({ getApiKey, getAuth, fetchImpl = fetch }) {
@@ -37,14 +39,38 @@ function createWorker({ rpc, heartbeat, onPreferred = () => {}, execute, now = D
   let lastHeartbeat = -Infinity;
   const running = new Set();
 
+  // Texto parcial para a tela do Jurix IA, no máximo a cada PROGRESS_EVERY_MS.
+  // Banco sem a RPC (migration local_ai_partial pendente): para de tentar.
+  let progressSupported = true;
+  function progress(jobId) {
+    let latest = "";
+    let timer = null;
+    const send = () => {
+      timer = null;
+      rpc("progress_local_ai_job", { p_job_id: jobId, p_partial: latest }).catch((e) => {
+        if (/404|PGRST202/.test(e.message)) progressSupported = false;
+      });
+    };
+    return {
+      update(text) {
+        latest = text;
+        if (progressSupported && !timer) timer = setTimeout(send, PROGRESS_EVERY_MS);
+      },
+      stop: () => clearTimeout(timer),
+    };
+  }
+
   async function handle(job) {
     let response = null;
     let error = null;
+    const partial = progress(job.id);
     try {
-      response = await execute(job.request);
+      response = await execute(job.request, partial.update);
     } catch (e) {
       error = (e && e.message) || "Falha ao executar a IA local.";
       log.error(`[jurix-desktop] tarefa ${job.id} falhou: ${error}`);
+    } finally {
+      partial.stop();
     }
     await rpc("complete_local_ai_job", {
       p_job_id: job.id,
