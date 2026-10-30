@@ -1,7 +1,7 @@
 // Jurix Desktop: o mesmo Jurix web numa janela, mais o motor de IA local.
 // Login, telas e regras são os da nuvem; o app só executa as tarefas de IA do
 // usuário logado na assinatura dele (Claude Code, Codex ou Antigravity).
-const { app, BrowserWindow, Menu, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
 const { readFileSync, writeFileSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
 const {
@@ -15,6 +15,7 @@ const {
   startLogin,
 } = require("./engines.cjs");
 const { createRpc, createWorker } = require("./worker.cjs");
+const { readFolderDocuments } = require("./folder.cjs");
 
 const TICK_MS = 1_000; // tempo máximo até o desktop pegar uma pergunta nova
 const RESCAN_EVERY_MS = 15_000; // mesmo ritmo do heartbeat: "Localizar IAs" na web espera isso
@@ -304,6 +305,17 @@ app.whenReady().then(() => {
     saveState({ aiStepDone: true });
     rescan();
     win.loadURL(`${config.appUrl}/dashboard`);
+  });
+
+  // "Anexar pasta" do Jurix IA. Só o Jurix (appOrigin) pode pedir, e nada é lido sem
+  // o advogado escolher a pasta na janela do sistema.
+  ipcMain.handle("files:pick-folder", async (event) => {
+    if (new URL(event.senderFrame.url).origin !== appOrigin) return null;
+    const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+      title: "Escolha a pasta com os documentos",
+      properties: ["openDirectory"],
+    });
+    return canceled || !filePaths[0] ? null : readFolderDocuments(filePaths[0]);
   });
 
   // Sessão do Supabase que o próprio Jurix web grava no localStorage (sb-<ref>-auth-token).

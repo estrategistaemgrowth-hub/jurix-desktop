@@ -1,9 +1,14 @@
 // Ponte das telas de onboarding (arquivos locais do app) com o processo principal.
-// O site jurix.work roda na mesma janela, mas NÃO recebe esta API: ela só existe
-// quando a página aberta é um arquivo do próprio app.
+// O site jurix.work roda na mesma janela e recebe SÓ o "anexar pasta": o processo
+// principal confere que o pedido veio do Jurix e abre a janela de escolha do sistema.
+// As outras funções (onboarding, atualização) só existem nos arquivos do próprio app.
 const { contextBridge, ipcRenderer } = require("electron");
 
-if (location.protocol === "file:") {
+if (location.protocol !== "file:") {
+  contextBridge.exposeInMainWorld("jurixDesktop", {
+    pickFolderDocuments: () => ipcRenderer.invoke("files:pick-folder"),
+  });
+} else {
   contextBridge.exposeInMainWorld("jurixDesktop", {
     platform: process.platform,
     scanEngines: () => ipcRenderer.invoke("onboarding:scan"),

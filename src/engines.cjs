@@ -455,8 +455,14 @@ async function runCodex(path, { system, prompt, quick }) {
   }
 }
 
+// No --mode plan o Antigravity às vezes "monta um plano" e pede confirmação em vez de
+// responder (visto com pasta anexada), ou tenta rodar comando para editar (bloqueado
+// pelo sandbox, resposta vazia). O Jurix só quer texto ou o JSON das ferramentas.
+const AGY_ANSWER_NOW =
+  "IMPORTANTE: você não tem terminal, arquivos nem comandos. Só pode responder em texto ou, para usar uma ferramenta do Jurix, responder só com o JSON de tool_calls descrito acima. Responda nesta mesma mensagem: não crie plano nem artefato e não peça confirmação.";
+
 async function runAgy(path, { system, prompt }) {
-  const full = `${system}\n\n${prompt}`;
+  const full = `${system}\n\n${prompt}\n\n${AGY_ANSWER_NOW}`;
   if (full.length > AGY_MAX_PROMPT_CHARS) {
     // Erro explícito: o servidor cai na API em vez de mandar o texto cortado.
     throw new Error("Conteúdo grande demais para o Antigravity; use Claude ou Codex.");
@@ -464,6 +470,14 @@ async function runAgy(path, { system, prompt }) {
   const out = await run(command(path, ["-p", full, ...AGY_SAFE_ARGS]));
   const j = JSON.parse(out);
   if (j.status !== "SUCCESS") throw new Error(j.response || j.status);
+  // Tentou agir no computador (bloqueado) e não respondeu: erro, e o servidor usa a API.
+  if (!String(j.response || "").trim()) {
+    throw new Error(
+      j.denied_actions?.length
+        ? "O Antigravity tentou uma ação bloqueada e não respondeu."
+        : "O Antigravity não respondeu.",
+    );
+  }
   return {
     text: j.response,
     usage: j.usage
