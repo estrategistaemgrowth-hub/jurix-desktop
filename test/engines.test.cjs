@@ -4,6 +4,7 @@ const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const {
+  CONTEXT_PREFIX,
   buildPrompt,
   parseToolReply,
   isQuick,
@@ -44,6 +45,21 @@ test("separa system e conversa, inclusive rodadas de ferramenta", () => {
   assert.match(built.prompt, /buscar_prazos\(\{\}\) \[id c1\]/);
   assert.match(built.prompt, /\[RESULTADO DA FERRAMENTA c1\]/);
   assert.equal(built.hasTools, true);
+});
+
+test("contexto da pergunta vai na mensagem; o system fica fixo (Claude pré-aberto)", () => {
+  const context = `${CONTEXT_PREFIX}: hoje é 30/10/2026.`;
+  const built = buildPrompt({
+    messages: [
+      { role: "system", content: "Você é o Jurix IA." },
+      { role: "system", content: context },
+      { role: "user", content: "Oi?" },
+    ],
+  });
+  assert.equal(built.system, "Você é o Jurix IA.");
+  assert.ok(built.prompt.startsWith(context));
+  assert.equal(built.warmable, true);
+  assert.equal(buildPrompt({ messages: [{ role: "user", content: "x" }] }).warmable, false);
 });
 
 test("sem ferramentas não injeta o protocolo JSON", () => {

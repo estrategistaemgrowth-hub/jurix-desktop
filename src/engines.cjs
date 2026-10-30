@@ -145,26 +145,85 @@ function cleanEnv(extra) {
   return env;
 }
 
-function run({ cmd, args, env }, input = "") {
-  return new Promise((resolve, reject) => {
-    // Pasta temporária como cwd: o CLI não lê CLAUDE.md/AGENTS.md nem arquivos do usuário.
-    const p = spawn(cmd, args, { env: cleanEnv(env), cwd: tmpdir(), windowsHide: true });
-    let out = "";
-    let err = "";
-    const timer = setTimeout(() => p.kill(), RUN_TIMEOUT_MS);
-    p.stdout.on("data", (d) => (out += d));
-    p.stderr.on("data", (d) => (err += d));
-    p.on("error", (e) => {
-      clearTimeout(timer);
-      reject(e);
-    });
+/** Sobe o CLI; ele espera a entrada (stdin) para trabalhar. */
+function start({ cmd, args, env }) {
+  // Pasta temporária como cwd: o CLI não lê CLAUDE.md/AGENTS.md nem arquivos do usuário.
+  const p = spawn(cmd, args, { env: cleanEnv(env), cwd: tmpdir(), windowsHide: true });
+  let out = "";
+  let err = "";
+  p.stdout.on("data", (d) => (out += d));
+  p.stderr.on("data", (d) => (err += d));
+  p.stdin.on("error", () => {}); // processo que morreu antes de receber a pergunta
+  const done = new Promise((resolve, reject) => {
+    p.on("error", reject);
     p.on("close", (code) => {
-      clearTimeout(timer);
       if (code === 0) resolve(out);
       else reject(new Error((err || out).trim().slice(-400) || `saiu com código ${code}`));
     });
-    p.stdin.end(input);
   });
+  done.catch(() => {}); // processo de reserva descartado sem uso
+  return { p, done };
+}
+
+/** Manda a entrada e espera o CLI terminar. */
+function finish(proc, input = "") {
+  const timer = setTimeout(() => proc.p.kill(), RUN_TIMEOUT_MS);
+  proc.p.stdin.end(input);
+  return proc.done.finally(() => clearTimeout(timer));
+}
+
+const run = (cmd, input = "") => finish(start(cmd), input);
+
+/**
+ * Como finish, mas devolve a saída assim que chega a linha completa com `marker`
+ * (o evento final), sem esperar o CLI encerrar; o processo é fechado em seguida.
+ */
+function finishOn(proc, input, marker) {
+  let out = "";
+  const early = new Promise((resolve) => {
+    const check = (d) => {
+      out += d;
+      const at = out.indexOf(marker);
+      if (at === -1 || out.indexOf("\n", at) === -1) return;
+      proc.p.stdout.off("data", check);
+      proc.p.kill();
+      resolve(out);
+    };
+    proc.p.stdout.on("data", check);
+  });
+  return Promise.race([finish(proc, input), early]);
+}
+
+// Claude pré-aberto: o programa leva 3-4 s só para subir (medido: 7 s por chamada
+// abrindo na hora, ~1,5 s com ele já de pé). Fica um de reserva, com as instruções
+// fixas do Jurix IA; cada processo atende UMA pergunta e é descartado, então nada
+// passa de uma conversa para outra.
+const WARM_IDLE_MS = 10 * 60_000;
+let claudeWarm = null; // { key, proc, timer }
+
+function disposeWarm() {
+  if (!claudeWarm) return;
+  clearTimeout(claudeWarm.timer);
+  claudeWarm.proc.p.kill();
+  claudeWarm = null;
+}
+
+function claudeProcess(path, args, warmable) {
+  const key = `${path}\n${args.join("\n")}`;
+  const hit = claudeWarm?.key === key && claudeWarm.proc.p.exitCode === null ? claudeWarm.proc : null;
+  if (hit) {
+    clearTimeout(claudeWarm.timer);
+    claudeWarm = null;
+  } else disposeWarm();
+  // Repõe a reserva já, para a próxima rodada (ferramenta → resposta) ou pergunta.
+  if (warmable) {
+    claudeWarm = {
+      key,
+      proc: start(command(path, args)),
+      timer: setTimeout(disposeWarm, WARM_IDLE_MS),
+    };
+  }
+  return hit || start(command(path, args));
 }
 
 const TOOL_PROTOCOL = [
@@ -177,12 +236,20 @@ const TOOL_PROTOCOL = [
   "Use ferramenta quando a resposta depender de dados que ainda não estão na conversa.",
 ].join("\n");
 
-/** Converte as mensagens no formato OpenAI (com tools) em system + prompt de texto. */
+// O servidor marca assim o contexto que muda a cada pergunta (data, panorama,
+// lições): ele vai na mensagem, e as instruções fixas ficam no system.
+const CONTEXT_PREFIX = "CONTEXTO DESTA CONVERSA";
+
+/**
+ * Converte as mensagens no formato OpenAI (com tools) em system + prompt de texto.
+ * warmable: pedido do Jurix IA (com contexto separado), que aproveita o Claude pré-aberto.
+ */
 function buildPrompt(request) {
   const system = [];
+  const context = [];
   const turns = [];
   for (const m of request.messages || []) {
-    if (m.role === "system") system.push(m.content);
+    if (m.role === "system") (m.content.startsWith(CONTEXT_PREFIX) ? context : system).push(m.content);
     else if (m.role === "user") turns.push(`[USUÁRIO]\n${m.content}`);
     else if (m.role === "assistant") {
       const calls = (m.tool_calls || []).map(
@@ -197,7 +264,12 @@ function buildPrompt(request) {
       TOOL_PROTOCOL.replace("%TOOLS%", JSON.stringify(tools.map((t) => t.function), null, 1)),
     );
   }
-  return { system: system.join("\n\n"), prompt: turns.join("\n\n"), hasTools: tools.length > 0 };
+  return {
+    system: system.join("\n\n"),
+    prompt: [...context, ...turns].join("\n\n"),
+    hasTools: tools.length > 0,
+    warmable: context.length > 0,
+  };
 }
 
 let callSeq = 0;
@@ -292,24 +364,29 @@ function isQuick(request) {
   return text.length > 0 && text.length <= 400 && !DRAFTING_RE.test(text);
 }
 
-async function runClaude(path, { system, prompt, quick }) {
-  const out = await run(
-    command(path, [
-      "-p",
-      "--output-format",
-      "stream-json", // traz o evento de cota (rate_limit_event) junto com o resultado
-      "--verbose",
-      "--no-session-persistence",
-      "--model",
-      "sonnet",
-      ...(quick ? ["--effort", "low"] : []),
-      "--safe-mode", // ignora hooks, MCPs, plugins e CLAUDE.md do usuário
-      "--tools",
-      "", // só gera texto: não mexe em arquivos nem roda comandos
-      "--system-prompt",
-      system || "Responda em português do Brasil.",
-    ]),
-    prompt,
+async function runClaude(path, { system, prompt, quick, warmable }) {
+  const args = [
+    "-p",
+    "--input-format",
+    "stream-json", // a pergunta entra pelo stdin depois: permite subir o processo antes
+    "--output-format",
+    "stream-json", // traz o evento de cota (rate_limit_event) junto com o resultado
+    "--verbose",
+    "--no-session-persistence",
+    "--model",
+    "sonnet",
+    ...(quick ? ["--effort", "low"] : []),
+    "--safe-mode", // ignora hooks, MCPs, plugins e CLAUDE.md do usuário
+    "--tools",
+    "", // só gera texto: não mexe em arquivos nem roda comandos
+    "--system-prompt",
+    system || "Responda em português do Brasil.",
+  ];
+  const message = { type: "user", message: { role: "user", content: prompt } };
+  const out = await finishOn(
+    claudeProcess(path, args, warmable),
+    `${JSON.stringify(message)}\n`,
+    '"type":"result"',
   );
   const events = out
     .split("\n")
@@ -457,6 +534,8 @@ async function runJob(engine, path, request) {
 
 module.exports = {
   ENGINES,
+  CONTEXT_PREFIX,
+  disposeWarm,
   LIMIT_RE,
   findEngine,
   buildPrompt,

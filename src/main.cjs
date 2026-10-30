@@ -10,6 +10,7 @@ const {
   findEngine,
   codexQuota,
   runJob,
+  disposeWarm,
   loginStatus,
   startLogin,
 } = require("./engines.cjs");
@@ -416,7 +417,10 @@ app.whenReady().then(() => {
     }
   }, TICK_MS);
 
-  app.on("before-quit", () => clearInterval(timer));
+  app.on("before-quit", () => {
+    clearInterval(timer);
+    disposeWarm(); // o Claude de reserva não fica rodando depois de fechar o app
+  });
 });
 
 app.on("window-all-closed", () => app.quit());
