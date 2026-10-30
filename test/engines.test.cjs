@@ -140,3 +140,10 @@ test("reconhece erro de limite da assinatura", () => {
   assert.match("stream error: 429 Too Many Requests", LIMIT_RE);
   assert.doesNotMatch("spawn ENOENT", LIMIT_RE);
 });
+
+test("pedido de ferramenta repetido em várias linhas vira uma chamada só", () => {
+  const line = '{"tool_calls":[{"name":"buscar_geral","arguments":{"termo":"João"}}]}';
+  const reply = parseToolReply(`${line}\n${line}\n${line}`);
+  assert.equal(reply.toolCalls.length, 1);
+  assert.equal(reply.toolCalls[0].function.arguments, '{"termo":"João"}');
+});

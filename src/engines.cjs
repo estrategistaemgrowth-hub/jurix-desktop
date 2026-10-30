@@ -277,23 +277,26 @@ let callSeq = 0;
 /** Lê a resposta do protocolo de ferramentas; texto fora do protocolo vira resposta final. */
 function parseToolReply(text) {
   const trimmed = text.trim();
-  const json = trimmed.match(/\{[\s\S]*\}/)?.[0];
-  try {
-    const parsed = JSON.parse(json);
-    if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
-      const toolCalls = parsed.tool_calls
-        .filter((c) => c && typeof c.name === "string")
-        .map((c) => ({
-          id: `local_${Date.now().toString(36)}_${callSeq++}`,
-          function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) },
-        }));
-      if (toolCalls.length > 0) return { content: "", toolCalls };
-    }
-    if (typeof parsed.content === "string") return { content: parsed.content };
-  } catch {
-    // não era JSON: segue como texto
-  }
-  return { content: trimmed };
+  // Um JSON só, ou um por linha (o Antigravity às vezes repete o pedido em várias linhas).
+  const objects = [trimmed.match(/\{[\s\S]*\}/)?.[0], ...trimmed.split("\n")]
+    .map((part) => {
+      try {
+        return part && part.trim().startsWith("{") ? JSON.parse(part) : null;
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+  const seen = new Set();
+  const toolCalls = objects
+    .flatMap((o) => (Array.isArray(o.tool_calls) ? o.tool_calls : []))
+    .filter((c) => c && typeof c.name === "string")
+    .map((c) => ({ name: c.name, arguments: JSON.stringify(c.arguments ?? {}) }))
+    .filter((c) => !seen.has(`${c.name}${c.arguments}`) && seen.add(`${c.name}${c.arguments}`))
+    .map((c) => ({ id: `local_${Date.now().toString(36)}_${callSeq++}`, function: c }));
+  if (toolCalls.length > 0) return { content: "", toolCalls };
+  const answer = objects.find((o) => typeof o.content === "string");
+  return { content: answer ? answer.content : trimmed };
 }
 
 const WINDOW_LABEL = { 300: "5 horas", 10080: "semana" };
@@ -459,7 +462,30 @@ async function runCodex(path, { system, prompt, quick }) {
 // responder (visto com pasta anexada), ou tenta rodar comando para editar (bloqueado
 // pelo sandbox, resposta vazia). O Jurix só quer texto ou o JSON das ferramentas.
 const AGY_ANSWER_NOW =
-  "IMPORTANTE: você não tem terminal, arquivos nem comandos. Só pode responder em texto ou, para usar uma ferramenta do Jurix, responder só com o JSON de tool_calls descrito acima. Responda nesta mesma mensagem: não crie plano nem artefato e não peça confirmação.";
+  "IMPORTANTE: você não tem terminal, arquivos nem comandos. Para usar uma ferramenta do Jurix, preencha tool_calls (uma vez cada). Para responder, escreva em content a resposta final dirigida ao usuário, como se falasse com ele (nunca um resumo do que você fez). Responda nesta mesma mensagem: não crie plano nem artefato e não peça confirmação.";
+
+// Formato fixo da resposta (--json-schema): sem ele, o Antigravity tentava rodar comando
+// em ~metade dos pedidos de ação (medido: 3/6 respondiam; com ele e as descrições, 8/8).
+const AGY_REPLY_SCHEMA = JSON.stringify({
+  type: "object",
+  properties: {
+    // Sem a descrição, ele preenchia "a tarefa foi concluída" em vez da resposta.
+    content: {
+      type: "string",
+      description:
+        "Resposta final ao usuário, completa, com as informações pedidas (datas, nomes, valores), em português. Vazio se for usar ferramenta.",
+    },
+    tool_calls: {
+      type: "array",
+      description: "Ferramentas do Jurix a chamar (cada uma uma vez). Vazio se já pode responder.",
+      items: {
+        type: "object",
+        properties: { name: { type: "string" }, arguments: { type: "object" } },
+        required: ["name", "arguments"],
+      },
+    },
+  },
+});
 
 async function runAgy(path, { system, prompt }) {
   const full = `${system}\n\n${prompt}\n\n${AGY_ANSWER_NOW}`;
@@ -467,10 +493,15 @@ async function runAgy(path, { system, prompt }) {
     // Erro explícito: o servidor cai na API em vez de mandar o texto cortado.
     throw new Error("Conteúdo grande demais para o Antigravity; use Claude ou Codex.");
   }
-  const out = await run(command(path, ["-p", full, ...AGY_SAFE_ARGS]));
-  const j = JSON.parse(out);
+  const ask = async () =>
+    JSON.parse(
+      await run(command(path, ["-p", full, ...AGY_SAFE_ARGS, "--json-schema", AGY_REPLY_SCHEMA])),
+    );
+  let j = await ask();
   if (j.status !== "SUCCESS") throw new Error(j.response || j.status);
-  // Tentou agir no computador (bloqueado) e não respondeu: erro, e o servidor usa a API.
+  // Tentou agir no computador (bloqueado pelo sandbox) e não respondeu: tenta mais uma
+  // vez (em geral acerta); se repetir, erro, e o servidor usa a API.
+  if (!String(j.response || "").trim() && j.denied_actions?.length) j = await ask();
   if (!String(j.response || "").trim()) {
     throw new Error(
       j.denied_actions?.length
@@ -478,15 +509,32 @@ async function runAgy(path, { system, prompt }) {
         : "O Antigravity não respondeu.",
     );
   }
+  // Com o formato fixo, a resposta final vem como {"content": "..."}; ferramenta segue em JSON.
+  let text = j.response;
+  try {
+    const parsed = JSON.parse(text);
+    if (typeof parsed.content === "string" && !parsed.tool_calls?.length) text = parsed.content;
+  } catch {
+    // texto solto: segue como veio
+  }
   return {
-    text: j.response,
+    text,
     usage: j.usage
       ? { prompt_tokens: j.usage.input_tokens, completion_tokens: j.usage.output_tokens }
       : undefined,
   };
 }
 
-const RUNNERS = { claude: runClaude, codex: runCodex, agy: runAgy };
+// Antigravity um pedido por vez: em paralelo ele falha muito mais (medido: 1/8 com 4
+// juntos, 4/5 em sequência). Os outros pedidos esperam na fila do app.
+let agyQueue = Promise.resolve();
+function runAgyInTurn(...args) {
+  const turn = agyQueue.then(() => runAgy(...args));
+  agyQueue = turn.catch(() => {});
+  return turn;
+}
+
+const RUNNERS = { claude: runClaude, codex: runCodex, agy: runAgyInTurn };
 
 const quiet = (path, args, input, timeoutMs) =>
   Promise.race([
