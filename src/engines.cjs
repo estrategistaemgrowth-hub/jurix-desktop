@@ -7,8 +7,6 @@ const { homedir, tmpdir } = require("node:os");
 const { join } = require("node:path");
 
 const ENGINES = ["claude", "codex", "agy"];
-// Windows limita a linha de comando a ~32 mil caracteres; o agy recebe o prompt como argumento.
-const AGY_MAX_PROMPT_CHARS = 30_000;
 const RUN_TIMEOUT_MS = 170_000; // um pouco abaixo dos 180 s que o servidor espera
 
 // O Jurix só precisa de TEXTO dos CLIs: tudo que deixa o agente agir na máquina fica
@@ -487,16 +485,33 @@ const AGY_REPLY_SCHEMA = JSON.stringify({
   },
 });
 
+// O pedido entra pelo stdin (stream-json): pela linha de comando o Windows limita a
+// ~32 mil caracteres e conversa média ou documento anexado não cabiam.
+const AGY_STREAM_ARGS = [
+  "--input-format",
+  "stream-json",
+  "--output-format",
+  "stream-json",
+  "--mode",
+  "plan",
+  "--sandbox",
+  "--json-schema",
+  AGY_REPLY_SCHEMA,
+];
+
 async function runAgy(path, { system, prompt }) {
   const full = `${system}\n\n${prompt}\n\n${AGY_ANSWER_NOW}`;
-  if (full.length > AGY_MAX_PROMPT_CHARS) {
-    // Erro explícito: o servidor cai na API em vez de mandar o texto cortado.
-    throw new Error("Conteúdo grande demais para o Antigravity; use Claude ou Codex.");
-  }
-  const ask = async () =>
-    JSON.parse(
-      await run(command(path, ["-p", full, ...AGY_SAFE_ARGS, "--json-schema", AGY_REPLY_SCHEMA])),
-    );
+  const message = { event: "user", message: { role: "user", content: full } };
+  const ask = async () => {
+    const out = await run(command(path, AGY_STREAM_ARGS), `${JSON.stringify(message)}\n`);
+    const result = out
+      .split("\n")
+      .filter((l) => l.includes('"event":"result"'))
+      .map((l) => JSON.parse(l).result)
+      .pop();
+    if (!result) throw new Error("O Antigravity não devolveu resposta.");
+    return result;
+  };
   let j = await ask();
   if (j.status !== "SUCCESS") throw new Error(j.response || j.status);
   // Tentou agir no computador (bloqueado pelo sandbox) e não respondeu: tenta mais uma
