@@ -61,14 +61,40 @@ const CANDIDATES = {
   ],
 };
 
+// Windows: o PATH do app é o de quando ele abriu, e o instalador de qualquer CLI só
+// grava o novo no registro. Lido de lá, o motor aparece sem reabrir o Jurix.
+function freshWinEnv() {
+  const read = (key) => {
+    try {
+      const out = execFileSync("reg.exe", ["query", key, "/v", "Path"], {
+        encoding: "utf8",
+        windowsHide: true,
+      });
+      return out.match(/\sPath\s+REG_(?:EXPAND_)?SZ\s+(.*)/i)?.[1].trim() ?? "";
+    } catch {
+      return "";
+    }
+  };
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^path$/i.test(k)));
+  env.Path = [
+    read("HKCU\\Environment"),
+    read("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment"),
+    process.env.PATH,
+  ]
+    .join(";")
+    .replace(/%([^%]+)%/g, (m, v) => process.env[v] ?? m);
+  return env;
+}
+
 function whichFromShell(name) {
   try {
     const out = win
-      ? execFileSync("where.exe", [name], { encoding: "utf8", windowsHide: true })
+      ? execFileSync("where.exe", [name], { encoding: "utf8", windowsHide: true, env: freshWinEnv() })
       : execFileSync(process.env.SHELL || "/bin/zsh", ["-lc", `command -v ${name}`], {
           encoding: "utf8",
         });
-    const path = out.split(/\r?\n/).find((l) => l && !/\.(cmd|ps1)$/i.test(l));
+    // Windows: só .exe (o npm também põe no PATH um script sem extensão, que não executa).
+    const path = out.split(/\r?\n/).find((l) => l && (win ? /\.exe\s*$/i : /./).test(l));
     return path && existsSync(path) ? path.trim() : null;
   } catch {
     return null;
